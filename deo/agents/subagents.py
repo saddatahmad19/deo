@@ -1,65 +1,32 @@
-"""
-deo/agents/subagents.py
-
-Subagent definitions for Forge's multi-agent coding pipeline.
-
-Architecture:
-  orchestrator
-    ├── planner-agent     — task breakdown, architecture planning
-    ├── implementer-agent — code writing, refactoring
-    ├── reviewer-agent    — code review, bug finding
-    ├── tester-agent      — test writing
-    └── documenter-agent  — documentation (optional)
-
-Each subagent is a dict matching DeepAgents' SubAgent schema:
-  {
-    "name": str,
-    "description": str,     # Used by orchestrator to decide when to delegate
-    "system_prompt": str,
-    "tools": list,
-    "model": str (optional)
-  }
-
-Subagents inherit the orchestrator's filesystem backend and get access
-to the `task` tool to spawn their own sub-subagents if needed.
-"""
-
+"""Subagent factory functions for deo."""
 from __future__ import annotations
-
 from typing import Any
 
+from deo.agents.schemas import (
+    PlanResult, ImplementResult, ReviewResult, RunResult, DocResult,
+)
 from deo.prompts.templates import (
-    DOCUMENTER_PROMPT,
-    IMPLEMENTER_PROMPT,
     PLANNER_PROMPT,
+    IMPLEMENTER_PROMPT,
     REVIEWER_PROMPT,
     TESTER_PROMPT,
+    DOCUMENTER_PROMPT,
 )
 from deo.tools.chroma_tools import CHROMA_TOOLS
 from deo.tools.git_tools import GIT_TOOLS
 
 
 def build_planner_subagent(model: str | None = None) -> dict[str, Any]:
-    """
-    Planner subagent: decomposes complex tasks into step-by-step implementation plans.
-
-    Best for:
-      - Multi-file changes
-      - Architecture decisions
-      - Understanding codebase before making changes
-    """
     config: dict[str, Any] = {
         "name": "planner-agent",
         "description": (
-            "Technical planning agent. Use when a task requires architecture decisions, "
-            "touches 3+ files, or needs careful decomposition before implementation. "
-            "Produces a detailed implementation plan the implementer can follow."
+            "Use for ANY task that touches 2+ files, requires architecture decisions, "
+            "or needs a sequenced plan before code is written. "
+            "Call this FIRST before implementer. Returns a structured PlanResult."
         ),
         "system_prompt": PLANNER_PROMPT,
-        "tools": [
-            *CHROMA_TOOLS,      # semantic_search, add_to_index, index_status, find_file
-            *GIT_TOOLS,         # git_status, git_diff, git_log, git_branch
-        ],
+        "response_format": PlanResult,
+        "tools": [*CHROMA_TOOLS, *GIT_TOOLS],
     }
     if model:
         config["model"] = model
@@ -67,26 +34,16 @@ def build_planner_subagent(model: str | None = None) -> dict[str, Any]:
 
 
 def build_implementer_subagent(model: str | None = None) -> dict[str, Any]:
-    """
-    Implementer subagent: writes, edits, and refactors code.
-
-    Best for:
-      - New feature implementation
-      - Refactoring existing code
-      - Following an implementation plan from the planner
-    """
     config: dict[str, Any] = {
         "name": "implementer-agent",
         "description": (
-            "Code implementation agent. Use when you need to write substantial new code, "
-            "implement a feature from a plan, or do a non-trivial refactor. "
-            "Writes clean, idiomatic, fully-functional code."
+            "Use to write or refactor code, following a plan from planner-agent. "
+            "Always call planner-agent first for multi-file tasks. "
+            "Returns a structured ImplementResult with files changed."
         ),
         "system_prompt": IMPLEMENTER_PROMPT,
-        "tools": [
-            *CHROMA_TOOLS,
-            *GIT_TOOLS,
-        ],
+        "response_format": ImplementResult,
+        "tools": [*CHROMA_TOOLS, *GIT_TOOLS],
     }
     if model:
         config["model"] = model
@@ -94,27 +51,16 @@ def build_implementer_subagent(model: str | None = None) -> dict[str, Any]:
 
 
 def build_reviewer_subagent(model: str | None = None) -> dict[str, Any]:
-    """
-    Reviewer subagent: reviews code for correctness, security, performance.
-
-    Best for:
-      - Post-implementation code review
-      - Security audits
-      - Performance analysis
-      - Finding bugs in existing code
-    """
     config: dict[str, Any] = {
         "name": "reviewer-agent",
         "description": (
-            "Code review agent. Use after implementation to check for bugs, security issues, "
-            "performance problems, and style violations. Produces a structured review with "
-            "severity labels (critical/warning/suggestion) and concrete fixes."
+            "Use AFTER implementer-agent completes. Reviews changed files for "
+            "correctness, security, and regressions. Returns ReviewResult with "
+            "approved=True/False and a list of issues by severity."
         ),
         "system_prompt": REVIEWER_PROMPT,
-        "tools": [
-            *CHROMA_TOOLS,
-            *GIT_TOOLS,
-        ],
+        "response_format": ReviewResult,
+        "tools": [*CHROMA_TOOLS, *GIT_TOOLS],
     }
     if model:
         config["model"] = model
@@ -122,26 +68,16 @@ def build_reviewer_subagent(model: str | None = None) -> dict[str, Any]:
 
 
 def build_tester_subagent(model: str | None = None) -> dict[str, Any]:
-    """
-    Tester subagent: writes unit and integration tests.
-
-    Best for:
-      - Writing tests for new code
-      - Improving test coverage
-      - Writing test strategies
-    """
     config: dict[str, Any] = {
         "name": "tester-agent",
         "description": (
-            "Test engineering agent. Use when you need to write tests for new or existing code, "
-            "improve test coverage, or design a testing strategy. Detects existing test frameworks "
-            "and follows project conventions. Runs tests after writing them."
+            "Use AFTER implementer-agent completes. Writes and runs tests for changed "
+            "code. Run in parallel with reviewer-agent. Returns RunResult with "
+            "all_pass=True/False and list of failures."
         ),
         "system_prompt": TESTER_PROMPT,
-        "tools": [
-            *CHROMA_TOOLS,
-            *GIT_TOOLS,
-        ],
+        "response_format": RunResult,
+        "tools": [*CHROMA_TOOLS, *GIT_TOOLS],
     }
     if model:
         config["model"] = model
@@ -149,25 +85,15 @@ def build_tester_subagent(model: str | None = None) -> dict[str, Any]:
 
 
 def build_documenter_subagent(model: str | None = None) -> dict[str, Any]:
-    """
-    Documenter subagent: writes docs, docstrings, and README content.
-
-    Best for:
-      - Adding/updating docstrings
-      - Writing README sections
-      - Documenting APIs
-    """
     config: dict[str, Any] = {
         "name": "documenter-agent",
         "description": (
-            "Technical documentation agent. Use when you need to write or update docstrings, "
-            "README files, API documentation, or inline comments. "
-            "Follows project documentation style."
+            "Use ONLY after reviewer-agent returns approved=True. Updates docstrings, "
+            "README, and AGENTS.md. Returns DocResult with list of files updated."
         ),
         "system_prompt": DOCUMENTER_PROMPT,
-        "tools": [
-            *CHROMA_TOOLS,
-        ],
+        "response_format": DocResult,
+        "tools": [*CHROMA_TOOLS, *GIT_TOOLS],
     }
     if model:
         config["model"] = model
@@ -175,39 +101,27 @@ def build_documenter_subagent(model: str | None = None) -> dict[str, Any]:
 
 
 def build_subagents(
-    model_string: str | None = None,
     enable_planner: bool = True,
     enable_implementer: bool = True,
     enable_reviewer: bool = True,
     enable_tester: bool = True,
     enable_documenter: bool = False,
+    planner_model: str | None = None,
+    implementer_model: str | None = None,
+    reviewer_model: str | None = None,
+    tester_model: str | None = None,
+    documenter_model: str | None = None,
 ) -> list[dict[str, Any]]:
-    """
-    Build the active subagent list based on config toggles.
-
-    Args:
-        model_string: Model override for subagents (e.g. "anthropic:claude-haiku-4-5-20251001"
-                      for cheaper/faster subagents). If None, inherits orchestrator's model.
-        enable_*: Toggle individual subagents on/off.
-
-    Returns:
-        List of subagent dicts ready to pass to create_deep_agent(subagents=...).
-    """
+    """Build active subagent list based on config toggles and per-role models."""
     subagents = []
-
     if enable_planner:
-        subagents.append(build_planner_subagent(model_string))
-
+        subagents.append(build_planner_subagent(planner_model))
     if enable_implementer:
-        subagents.append(build_implementer_subagent(model_string))
-
+        subagents.append(build_implementer_subagent(implementer_model))
     if enable_reviewer:
-        subagents.append(build_reviewer_subagent(model_string))
-
+        subagents.append(build_reviewer_subagent(reviewer_model))
     if enable_tester:
-        subagents.append(build_tester_subagent(model_string))
-
+        subagents.append(build_tester_subagent(tester_model))
     if enable_documenter:
-        subagents.append(build_documenter_subagent(model_string))
-
+        subagents.append(build_documenter_subagent(documenter_model))
     return subagents
