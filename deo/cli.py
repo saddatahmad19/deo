@@ -27,14 +27,56 @@ from deo.tui.display import (
     console,
     print_banner,
     print_error,
-    print_help,
     print_info,
     print_rule,
-    print_session_info,
     print_success,
     print_warning,
-    prompt_user,
 )
+from deo.tui.input import SlashCommand, build_prompt_session, make_prompt_message
+
+# ---------------------------------------------------------------------------
+# Slash command registry
+# ---------------------------------------------------------------------------
+
+SLASH_COMMANDS: list[SlashCommand] = [
+    SlashCommand("help",     "Show this help message"),
+    SlashCommand("clear",    "Clear the terminal screen"),
+    SlashCommand("status",   "Show index status and session info", aliases=["index-status"]),
+    SlashCommand("index",    "Re-index the codebase"),
+    SlashCommand("init",     "Generate AGENTS.md and index important files into a named Chroma collection"),
+    SlashCommand("profile",  "Switch agent profile", usage="profile <name>"),
+    SlashCommand("profiles", "List available agent profiles"),
+    SlashCommand("exit",     "Exit Deo", aliases=["quit", "q"]),
+]
+
+
+def _print_help(commands: list[SlashCommand]) -> None:
+    from rich.markdown import Markdown
+
+    rows = []
+    for cmd in commands:
+        label = f"`/{cmd.usage if cmd.usage else cmd.name}`"
+        if cmd.aliases:
+            label += " / " + " / ".join(f"`/{a}`" for a in cmd.aliases)
+        rows.append(f"| {label} | {cmd.description} |")
+
+    table = "\n".join(rows)
+    text = f"""\
+## Deo Commands
+
+| Command | Description |
+|---------|-------------|
+{table}
+
+## Tips
+
+- Use **semantic_search** — Deo automatically searches your codebase before coding
+- Start complex tasks with a clear description; the planner will break it down
+- Add `AGENTS.md` to your project root with architecture notes for persistent context
+- Use `.deo.toml` in your project for project-specific config
+"""
+    console.print(Markdown(text))
+
 
 app = typer.Typer(
     name="deo",
@@ -151,6 +193,43 @@ def _run_index(indexer: Any, quiet: bool = False) -> None:
         print_success(str(result))
 
 
+def _run_init(config: DeoConfig, quiet: bool = False) -> None:
+    """Generate AGENTS.md and index important files into a named Chroma collection."""
+    from deo.init.agents_md import generate_agents_md
+    from deo.init.repo_indexer import index_important_files
+
+    root = config.root_dir
+    agents_md_path = root / config.agents_md_path
+
+    if not quiet:
+        print_info(f"Analysing repository: {root.name} ...")
+
+    agents_md_text, important_files = generate_agents_md(
+        root=root,
+        model_string=config.model.model_string,
+    )
+
+    agents_md_path.write_text(agents_md_text, encoding="utf-8")
+    if not quiet:
+        print_success(f"Wrote {agents_md_path} ({len(agents_md_text)} chars)")
+
+    if not quiet:
+        print_info(f"Indexing {len(important_files)} important files into Chroma ...")
+
+    try:
+        collection_name, n_chunks = index_important_files(
+            root=root,
+            important_files=important_files,
+        )
+        if not quiet:
+            print_success(
+                f"Indexed {n_chunks} chunks into collection [bold]{collection_name}[/]"
+            )
+    except Exception as e:
+        if not quiet:
+            print_warning(f"Chroma indexing failed: {e}")
+
+
 # ---------------------------------------------------------------------------
 # Streaming run loop
 # ---------------------------------------------------------------------------
@@ -223,17 +302,16 @@ def _handle_slash_command(
     agent may be rebuilt on profile switch.
     """
     from deo.agents.registry import list_profiles
-    from deo.tui.display import print_help
 
     parts = cmd.strip().split()
     command = parts[0].lower()
 
     if command in ("/exit", "/quit", "/q"):
-        console.print("[dim]Goodbye. 👋[/]")
+        console.print("[dim]Goodbye.[/]")
         sys.exit(0)
 
     elif command == "/help":
-        print_help()
+        _print_help(SLASH_COMMANDS)
 
     elif command == "/clear":
         console.clear()
@@ -250,6 +328,9 @@ def _handle_slash_command(
         else:
             print_info("Re-indexing codebase...")
             _run_index(indexer, quiet=False)
+
+    elif command == "/init":
+        _run_init(config, quiet=False)
 
     elif command == "/profiles":
         profiles = list_profiles()
@@ -291,6 +372,7 @@ def _handle_slash_command(
     else:
         print_warning(f"Unknown command: {command}. Type /help for available commands.")
 
+    print_rule()
     return True, manager, indexer, agent
 
 
@@ -334,8 +416,6 @@ def main(
         config.model.override(model)
     if no_index:
         config.chroma.auto_index = False
-
-    print_banner()
 
     # Initialize
     try:
@@ -381,22 +461,31 @@ def main(
     # -----------------------------------------------------------------------
     # Interactive REPL
     # -----------------------------------------------------------------------
-    print_session_info(
+    print_banner(
         session_id=session_id,
         model=config.model.model_string,
         root_dir=str(project_root),
         n_indexed=manager.count() if manager is not None else 0,
     )
-    print_rule()
 
     thread_id = session_id
+    prompt_session = build_prompt_session(
+        commands=SLASH_COMMANDS,
+        session_id=session_id,
+        model=config.model.model_string,
+        cwd=str(project_root),
+        get_n_indexed=lambda: manager.count() if manager is not None else 0,
+    )
 
     while True:
         try:
-            user_input = prompt_user(session_id)
-        except (EOFError, KeyboardInterrupt):
-            console.print("\n[dim]Use /exit to quit.[/]")
+            user_input = prompt_session.prompt(make_prompt_message).strip()
+        except KeyboardInterrupt:
+            console.print("[dim]Interrupted. Use /exit to quit.[/]")
             continue
+        except EOFError:
+            console.print("[dim]Goodbye.[/]")
+            break
 
         if not user_input:
             continue
@@ -488,6 +577,20 @@ def status_command(
     for p in list_profiles():
         console.print(f"  [cyan]{p.name:15}[/] {p.description}")
     console.print()
+
+
+@app.command("init")
+def init_command(
+    root: Optional[str] = typer.Option(None, "--root", "-r", help="Project root directory"),
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="Model override for analysis"),
+) -> None:
+    """Generate AGENTS.md and index important files into a named Chroma collection."""
+    project_root = Path(root).resolve() if root else find_project_root()
+    config = DeoConfig.load(project_root)
+    if model:
+        config.model.override(model)
+    config.ensure_deo_dir()
+    _run_init(config, quiet=False)
 
 
 @app.command("config")
