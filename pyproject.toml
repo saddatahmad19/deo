@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "deo-agent"
+version = "0.1.0"
+description = "A terminal-native AI coding tool built on Deep Agents + ChromaDB"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+keywords = ["ai", "coding", "agent", "terminal", "llm"]
+
+dependencies = [
+    # Core agent framework
+    "deepagents>=0.4.0",
+    "langchain>=0.3.0",
+    "langchain-anthropic>=0.3.0",
+    "langgraph>=0.4.0",
+
+    # Vector database
+    "chromadb>=0.6.0",
+
+    # CLI / TUI
+    "typer[all]>=0.12.0",
+    "rich>=13.0.0",
+    "prompt-toolkit>=3.0.0",
+
+    # Config
+    "tomli>=2.0.0; python_version < '3.11'",
+
+    # Utilities
+    "pathspec>=0.12.0",  # gitignore-style pattern matching
+    "tiktoken>=0.7.0",   # token counting
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+openai = ["langchain-openai>=0.3.0"]
+google = ["langchain-google-genai>=2.0.0"]
+dev = ["pytest", "pytest-asyncio", "ruff", "mypy"]
+
+[project.scripts]
+deo = "deo.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["deo*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
