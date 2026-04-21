@@ -250,6 +250,13 @@ reviewer = true
 tester = true
 documenter = false
 
+# Optional: override the model for individual subagents (inherits orchestrator model if unset)
+# planner_model = "anthropic:claude-sonnet-4-6"
+# implementer_model = "anthropic:claude-opus-4-7"
+# reviewer_model = "anthropic:claude-haiku-4-5-20251001"
+# tester_model = "anthropic:claude-haiku-4-5-20251001"
+# documenter_model = "anthropic:claude-haiku-4-5-20251001"
+
 [display]
 theme = "dark"
 show_tool_calls = true
