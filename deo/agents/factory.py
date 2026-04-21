@@ -88,6 +88,9 @@ def _build_model(config: DeoConfig) -> Any:
             temperature=config.model.temperature,
             max_retries=config.model.max_retries,
             timeout=config.model.timeout,
+            # Models like gpt-5.3-codex only support the Responses API on Azure;
+            # use_responses_api=True enables it unconditionally for all Azure deployments.
+            use_responses_api=True,
         )
 
     # anthropic / openai / google_genai — all read their key from standard env vars
