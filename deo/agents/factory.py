@@ -198,6 +198,11 @@ def create_deo_agent(
         enable_reviewer=config.subagents.reviewer,
         enable_tester=config.subagents.tester,
         enable_documenter=config.subagents.documenter,
+        planner_model=config.subagents.planner_model,
+        implementer_model=config.subagents.implementer_model,
+        reviewer_model=config.subagents.reviewer_model,
+        tester_model=config.subagents.tester_model,
+        documenter_model=config.subagents.documenter_model,
     )
 
     # ------------------------------------------------------------------
