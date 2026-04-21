@@ -93,7 +93,7 @@ def build_documenter_subagent(model: str | None = None) -> dict[str, Any]:
         ),
         "system_prompt": DOCUMENTER_PROMPT,
         "response_format": DocResult,
-        "tools": [*CHROMA_TOOLS, *GIT_TOOLS],
+        "tools": [*CHROMA_TOOLS],
     }
     if model:
         config["model"] = model

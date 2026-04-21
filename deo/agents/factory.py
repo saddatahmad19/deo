@@ -17,6 +17,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from deepagents import create_deep_agent
 from deepagents.backends import LocalShellBackend
 
+from deo.agents.middleware import build_orchestrator_middleware
 from deo.agents.subagents import build_subagents
 from deo.config import DeoConfig
 from deo.memory.chroma_manager import ChromaManager
@@ -103,6 +104,42 @@ def _build_model(config: DeoConfig) -> Any:
     )
 
 
+def _to_backend_path(root_dir: Path, path: Path) -> str | None:
+    """
+    Convert a local directory path into a Deep Agents backend path.
+
+    Backend paths must be absolute POSIX-style paths rooted at the backend root.
+    """
+    try:
+        rel = path.resolve().relative_to(root_dir.resolve())
+    except ValueError:
+        return None
+    return f"/{rel.as_posix().rstrip('/')}/"
+
+
+def _resolve_skill_sources(root_dir: Path) -> list[str]:
+    """
+    Discover Deep Agents skill directories in priority order.
+
+    Later sources override earlier ones, so project-local `.deo/skills` is applied
+    after package-provided `deo/skills`.
+    """
+    candidates = [
+        root_dir / "deo" / "skills",
+        root_dir / ".deo" / "skills",
+    ]
+    discovered: list[str] = []
+    for candidate in candidates:
+        if not candidate.is_dir():
+            continue
+        if not list(candidate.glob("*/SKILL.md")):
+            continue
+        backend_path = _to_backend_path(root_dir, candidate)
+        if backend_path:
+            discovered.append(backend_path)
+    return discovered
+
+
 def create_deo_agent(
     config: DeoConfig,
     manager: ChromaManager | None,
@@ -154,8 +191,8 @@ def create_deo_agent(
     # ------------------------------------------------------------------
     # 4. Build subagents
     # ------------------------------------------------------------------
+    skill_sources = _resolve_skill_sources(config.root_dir)
     subagents = build_subagents(
-        model_string=None,  # Inherit orchestrator model
         enable_planner=config.subagents.planner,
         enable_implementer=config.subagents.implementer,
         enable_reviewer=config.subagents.reviewer,
@@ -172,13 +209,17 @@ def create_deo_agent(
     # 6. Create agent
     # ------------------------------------------------------------------
     checkpointer = checkpointer or MemorySaver()
+    backend = LocalShellBackend(root_dir=str(config.root_dir), virtual_mode=True)
+    middleware = build_orchestrator_middleware(model, backend, str(config.root_dir))
 
     agent = create_deep_agent(
         model=model,
         tools=orchestrator_tools,
         system_prompt=system_prompt,
         subagents=subagents,
-        backend=LocalShellBackend(root_dir=str(config.root_dir)),
+        skills=skill_sources or None,
+        middleware=middleware,
+        backend=backend,
         checkpointer=checkpointer,
     )
 
