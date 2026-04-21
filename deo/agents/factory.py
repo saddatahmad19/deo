@@ -102,8 +102,8 @@ def _build_model(config: DeoConfig) -> Any:
 
 def create_deo_agent(
     config: DeoConfig,
-    manager: ChromaManager,
-    indexer: CodebaseIndexer,
+    manager: ChromaManager | None,
+    indexer: CodebaseIndexer | None,
     checkpointer: MemorySaver | None = None,
     extra_tools: list[Any] | None = None,
     extra_system_prompt: str = "",
@@ -113,14 +113,18 @@ def create_deo_agent(
     # ------------------------------------------------------------------
     # 1. Configure shared tool state
     # ------------------------------------------------------------------
-    configure_chroma_tools(manager, indexer, n_results=config.chroma.n_results)
     configure_git_tools(config.root_dir)
+    if manager is not None and indexer is not None:
+        configure_chroma_tools(manager, indexer, n_results=config.chroma.n_results)
+        chroma_tools = list(CHROMA_TOOLS)
+    else:
+        chroma_tools = []
 
     # ------------------------------------------------------------------
     # 2. Assemble orchestrator tools
     # ------------------------------------------------------------------
     orchestrator_tools = [
-        *CHROMA_TOOLS,
+        *chroma_tools,
         *GIT_TOOLS,
         *(extra_tools or []),
     ]

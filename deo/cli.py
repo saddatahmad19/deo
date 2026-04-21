@@ -80,31 +80,40 @@ def _initialize(
 
     config.ensure_deo_dir()
 
-    # Init ChromaDB
-    manager = ChromaManager(
-        persist_path=config.chroma_persist_path,
-        collection_name=config.chroma.collection_name,
-    )
+    # Init ChromaDB (optional; continue without it if unavailable)
+    manager = None
+    indexer = None
+    try:
+        manager = ChromaManager(
+            persist_path=config.chroma_persist_path,
+            collection_name=config.chroma.collection_name,
+        )
 
-    indexer = CodebaseIndexer(
-        root=config.root_dir,
-        manager=manager,
-        config=config.chroma,
-    )
+        indexer = CodebaseIndexer(
+            root=config.root_dir,
+            manager=manager,
+            config=config.chroma,
+        )
 
-    # Index codebase
-    if config.chroma.auto_index:
-        n_existing = manager.count()
-        if n_existing == 0 or force_reindex:
-            if not quiet:
-                print_info("Indexing codebase for semantic search...")
-            _run_index(indexer, quiet=quiet)
-        else:
-            if not quiet:
-                print_info(
-                    f"Using existing index: {n_existing} chunks across "
-                    f"{len(manager.get_indexed_files())} files"
-                )
+        # Index codebase
+        if config.chroma.auto_index:
+            n_existing = manager.count()
+            if n_existing == 0 or force_reindex:
+                if not quiet:
+                    print_info("Indexing codebase for semantic search...")
+                _run_index(indexer, quiet=quiet)
+            else:
+                if not quiet:
+                    print_info(
+                        f"Using existing index: {n_existing} chunks across "
+                        f"{len(manager.get_indexed_files())} files"
+                    )
+    except Exception as e:
+        if not quiet:
+            print_warning(
+                "Chroma unavailable; continuing without semantic index/tools "
+                f"({e})."
+            )
 
     # Build agent
     checkpointer = MemorySaver()
@@ -236,8 +245,11 @@ def _handle_slash_command(
         console.print(result)
 
     elif command == "/index":
-        print_info("Re-indexing codebase...")
-        _run_index(indexer, quiet=False)
+        if indexer is None:
+            print_warning("Chroma is unavailable. Skipping index.")
+        else:
+            print_info("Re-indexing codebase...")
+            _run_index(indexer, quiet=False)
 
     elif command == "/profiles":
         profiles = list_profiles()
@@ -254,6 +266,7 @@ def _handle_slash_command(
             try:
                 from deo.agents.factory import create_deo_agent
                 from deo.agents.registry import get_profile
+                from langgraph.checkpoint.memory import MemorySaver
                 profile = get_profile(profile_name)
 
                 # Apply profile overrides to config
@@ -372,7 +385,7 @@ def main(
         session_id=session_id,
         model=config.model.model_string,
         root_dir=str(project_root),
-        n_indexed=manager.count(),
+        n_indexed=manager.count() if manager is not None else 0,
     )
     print_rule()
 
@@ -425,10 +438,15 @@ def index_command(
     config = DeoConfig.load(project_root)
     config.ensure_deo_dir()
 
-    manager = ChromaManager(
-        persist_path=config.chroma_persist_path,
-        collection_name=config.chroma.collection_name,
-    )
+    try:
+        manager = ChromaManager(
+            persist_path=config.chroma_persist_path,
+            collection_name=config.chroma.collection_name,
+        )
+    except Exception as e:
+        print_warning(f"Chroma is unavailable. Skipping index ({e}).")
+        return
+
     indexer = CodebaseIndexer(root=project_root, manager=manager, config=config.chroma)
 
     print_info(f"Indexing: {project_root}")
@@ -446,19 +464,24 @@ def status_command(
     project_root = Path(root).resolve() if root else find_project_root()
     config = DeoConfig.load(project_root)
 
-    manager = ChromaManager(
-        persist_path=config.chroma_persist_path,
-        collection_name=config.chroma.collection_name,
-    )
-
-    n_chunks = manager.count()
-    n_files = len(manager.get_indexed_files())
+    n_chunks = 0
+    n_files = 0
+    chroma_status = f"{config.chroma_persist_path}"
+    try:
+        manager = ChromaManager(
+            persist_path=config.chroma_persist_path,
+            collection_name=config.chroma.collection_name,
+        )
+        n_chunks = manager.count()
+        n_files = len(manager.get_indexed_files())
+    except Exception as e:
+        chroma_status = f"{config.chroma_persist_path} (unavailable: {e})"
 
     console.print(f"\n[bold]Deo Status[/]")
     console.print(f"  Project:  {project_root}")
     console.print(f"  Model:    {config.model.model_string}")
     console.print(f"  Index:    {n_chunks} chunks / {n_files} files")
-    console.print(f"  ChromaDB: {config.chroma_persist_path}")
+    console.print(f"  ChromaDB: {chroma_status}")
     console.print()
 
     console.print("[bold]Available Profiles:[/]")
