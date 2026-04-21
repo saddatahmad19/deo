@@ -20,7 +20,6 @@ from pathlib import Path
 from typing import Any, Optional
 
 import typer
-from rich.console import Console
 
 from deo.config import DeoConfig
 from deo.tui.display import (
@@ -202,7 +201,7 @@ def _stream_agent_response(
 
 def _handle_slash_command(
     cmd: str,
-    config: ForgeConfig,
+    config: DeoConfig,
     manager: Any,
     indexer: Any,
     agent: Any,

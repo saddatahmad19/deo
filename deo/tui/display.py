@@ -128,22 +128,17 @@ class StreamDisplay:
     def __init__(self, show_tool_calls: bool = True, show_thinking: bool = False) -> None:
         self.show_tool_calls = show_tool_calls
         self.show_thinking = show_thinking
-        self._current_content = ""
         self._in_tool = False
         self._current_tool_name = ""
 
     @contextmanager
     def streaming_context(self) -> Iterator[None]:
         """Context manager for a single streaming response."""
-        self._current_content = ""
         self._in_tool = False
         try:
             yield
         finally:
-            # Print any remaining buffered content
-            if self._current_content:
-                # Render final content as Markdown if non-trivial
-                self._flush_content()
+            self._flush_content()
 
     def handle_stream_chunk(self, chunk: Any) -> None:
         """
@@ -181,9 +176,6 @@ class StreamDisplay:
                             console.print(f"[deo.thinking]💭 {thinking_text[:200]}...[/]")
 
     def _stream_text(self, text: str) -> None:
-        """Buffer and print streaming text tokens."""
-        self._current_content += text
-        # Print token-by-token for live feel
         console.print(text, end="", markup=False, highlight=False)
 
     def _flush_content(self) -> None:

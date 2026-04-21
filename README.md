@@ -1,16 +1,16 @@
-# ⚡ Forge
+# ⚡ Deo
 
 **A terminal-native AI coding tool** built on [Deep Agents](https://github.com/langchain-ai/deepagents) + [ChromaDB](https://github.com/chroma-core/chroma).
 
 Think Claude Code, Codex, or OpenCode — but fully open source, model-agnostic, and with semantic codebase search built in.
 
 ```
-  ███████╗ ██████╗ ██████╗  ██████╗ ███████╗
-  ██╔════╝██╔═══██╗██╔══██╗██╔════╝ ██╔════╝
-  █████╗  ██║   ██║██████╔╝██║  ███╗█████╗
-  ██╔══╝  ██║   ██║██╔══██╗██║   ██║██╔══╝
-  ██║     ╚██████╔╝██║  ██║╚██████╔╝███████╗
-  ╚═╝      ╚═════╝ ╚═╝  ╚═╝ ╚═════╝ ╚══════╝
+  ██████╗ ███████╗ ██████╗
+  ██╔══██╗██╔════╝██╔═══██╗
+  ██║  ██║█████╗  ██║   ██║
+  ██║  ██║██╔══╝  ██║   ██║
+  ██████╔╝███████╗╚██████╔╝
+  ╚═════╝ ╚══════╝ ╚═════╝
 ```
 
 ---
@@ -31,9 +31,9 @@ Think Claude Code, Codex, or OpenCode — but fully open source, model-agnostic,
 ## Installation
 
 ```bash
-pip install forge-agent
+pip install deo-agent
 # or
-uv add forge-agent
+uv add deo-agent
 ```
 
 Set your model API key:
@@ -50,26 +50,26 @@ export ANTHROPIC_API_KEY="sk-..."
 ```bash
 # Start interactive session in your project
 cd /path/to/my/project
-forge
+deo
 
 # One-shot command
-forge "Add input validation to the user registration endpoint"
+deo "Add input validation to the user registration endpoint"
 
 # Use a specific model
-forge --model openai:gpt-4o
+deo --model openai:gpt-4o
 
 # Code review mode only
-forge --profile review "Review the auth module for security issues"
+deo --profile review "Review the auth module for security issues"
 
 # Force full re-index
-forge --force-index
+deo --force-index
 ```
 
 ---
 
 ## Multi-Agent Architecture
 
-Forge uses a **multi-prompt** orchestration system where a senior orchestrator agent coordinates specialized subagents:
+Deo uses a **multi-prompt** orchestration system where a senior orchestrator agent coordinates specialized subagents:
 
 ```
 User prompt
@@ -117,10 +117,10 @@ Each subagent has:
 
 ## ChromaDB Semantic Search
 
-Forge automatically indexes your codebase into ChromaDB on startup. This gives all agents the ability to find relevant code _before_ writing anything new.
+Deo automatically indexes your codebase into ChromaDB on startup. This gives all agents the ability to find relevant code _before_ writing anything new.
 
 ```
-.forge/
+.deo/
 └── chroma/               ← Persistent ChromaDB index
     ├── chroma.sqlite3
     └── file_hashes.json  ← Tracks which files need re-indexing
@@ -155,18 +155,18 @@ Switch modes with `--profile` or the `/profile` command in the REPL:
 
 ## Configuration
 
-Forge uses hierarchical TOML config:
+Deo uses hierarchical TOML config:
 
-1. `~/.forge/config.toml` — global user config
-2. `.forge.toml` — project-local config (overrides global)
+1. `~/.deo/config.toml` — global user config
+2. `.deo.toml` — project-local config (overrides global)
 
 Initialize a project config:
 
 ```bash
-forge config --init
+deo config --init
 ```
 
-Example `.forge.toml`:
+Example `.deo.toml`:
 
 ```toml
 [model]
@@ -194,7 +194,7 @@ show_tool_calls = true
 
 ## AGENTS.md
 
-Create an `AGENTS.md` at your project root to give Forge persistent context about your project:
+Create an `AGENTS.md` at your project root to give Deo persistent context about your project:
 
 ```markdown
 # Project: MyApp
@@ -220,7 +220,7 @@ Create an `AGENTS.md` at your project root to give Forge persistent context abou
 - `src/middleware/auth.py` — Authentication logic
 ```
 
-Forge reads this file and includes it in every agent's context.
+Deo reads this file and includes it in every agent's context.
 
 ---
 
@@ -234,17 +234,17 @@ Forge reads this file and includes it in every agent's context.
 | `/profile <name>` | Switch agent profile        |
 | `/profiles`       | List all profiles           |
 | `/clear`          | Clear the screen            |
-| `/exit`           | Exit Forge                  |
+| `/exit`           | Exit Deo                    |
 
 ---
 
-## Extending Forge
+## Extending Deo
 
 ### Adding custom tools
 
 ```python
 from langchain_core.tools import tool
-from forge.tools.registry import get_registry
+from deo.tools.registry import get_registry
 
 @tool
 def query_database(sql: str) -> str:
@@ -259,7 +259,7 @@ get_registry().register(query_database, tags=["database", "custom"])
 ### Adding custom agent profiles
 
 ```python
-from forge.agents.registry import AgentProfile, register_profile
+from deo.agents.registry import AgentProfile, register_profile
 
 register_profile(AgentProfile(
     name="security-audit",
@@ -278,7 +278,7 @@ register_profile(AgentProfile(
 ### Adding custom prompts
 
 ```python
-from forge.prompts.templates import register_prompt
+from deo.prompts.templates import register_prompt
 
 register_prompt("my-agent", """
 You are a specialized database migration agent...
@@ -289,20 +289,20 @@ You are a specialized database migration agent...
 
 ```python
 from pathlib import Path
-from forge.config import ForgeConfig
-from forge.agents.factory import create_forge_agent
-from forge.memory.chroma_manager import ChromaManager
-from forge.memory.indexer import CodebaseIndexer
+from deo.config import DeoConfig
+from deo.agents.factory import create_deo_agent
+from deo.memory.chroma_manager import ChromaManager
+from deo.memory.indexer import CodebaseIndexer
 from langgraph.checkpoint.memory import MemorySaver
 
-config = ForgeConfig.load(Path("/my/project"))
-config.ensure_forge_dir()
+config = DeoConfig.load(Path("/my/project"))
+config.ensure_deo_dir()
 
 manager = ChromaManager(config.chroma_persist_path)
 indexer = CodebaseIndexer(config.root_dir, manager, config.chroma)
 indexer.index()  # Build index
 
-agent = create_forge_agent(config, manager, indexer)
+agent = create_deo_agent(config, manager, indexer)
 
 result = agent.invoke({
     "messages": [{"role": "user", "content": "Add rate limiting to the API"}]
@@ -314,13 +314,13 @@ result = agent.invoke({
 ## Project Layout
 
 ```
-forge/
+deo/
 ├── pyproject.toml
-├── forge/
+├── deo/
 │   ├── cli.py                  ← typer CLI entry point + REPL
-│   ├── config.py               ← ForgeConfig (hierarchical TOML)
+│   ├── config.py               ← DeoConfig (hierarchical TOML)
 │   ├── agents/
-│   │   ├── factory.py          ← create_forge_agent() — wires everything together
+│   │   ├── factory.py          ← create_deo_agent() — wires everything together
 │   │   ├── subagents.py        ← All subagent definitions
 │   │   └── registry.py         ← AgentProfile registry
 │   ├── tools/

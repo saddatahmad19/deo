@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 from langchain.chat_models import init_chat_model
 from langgraph.checkpoint.memory import MemorySaver
@@ -23,6 +24,28 @@ from deo.memory.indexer import CodebaseIndexer
 from deo.prompts.templates import ORCHESTRATOR_PROMPT
 from deo.tools.chroma_tools import CHROMA_TOOLS, configure_chroma_tools
 from deo.tools.git_tools import GIT_TOOLS, configure_git_tools
+
+
+def _normalize_azure_endpoint_and_version(raw_endpoint: str) -> tuple[str, str | None]:
+    """
+    Normalize Azure endpoint input for AzureChatOpenAI.
+
+    Users often paste the Foundry "Target URI" (for example:
+    https://<resource>.cognitiveservices.azure.com/openai/responses?api-version=...).
+    AzureChatOpenAI expects only the resource base endpoint; it appends the path.
+    """
+    endpoint = raw_endpoint.strip()
+    parsed = urlparse(endpoint)
+    if not parsed.scheme or not parsed.netloc:
+        raise ValueError(
+            "AZURE_OPENAI_ENDPOINT must be a valid URL like "
+            "https://<resource>.openai.azure.com/ or "
+            "https://<resource>.cognitiveservices.azure.com/."
+        )
+
+    inferred_api_version = parse_qs(parsed.query).get("api-version", [None])[0]
+    normalized_endpoint = f"{parsed.scheme}://{parsed.netloc}/"
+    return normalized_endpoint, inferred_api_version
 
 
 def _build_model(config: DeoConfig) -> Any:
@@ -49,11 +72,19 @@ def _build_model(config: DeoConfig) -> Any:
 
     if provider == "azure_openai":
         from langchain_openai import AzureChatOpenAI
+        normalized_endpoint, inferred_api_version = _normalize_azure_endpoint_and_version(
+            os.environ["AZURE_OPENAI_ENDPOINT"]
+        )
         return AzureChatOpenAI(
             azure_deployment=name,
-            azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
+            azure_endpoint=normalized_endpoint,
             api_key=os.environ["AZURE_OPENAI_API_KEY"],
-            api_version=os.environ.get("AZURE_OPENAI_API_VERSION", "2024-02-01"),
+            api_version=(
+                inferred_api_version
+                or os.environ.get("AZURE_OPENAI_API_VERSION")
+                or os.environ.get("OPENAI_API_VERSION")
+                or "2024-02-01"
+            ),
             temperature=config.model.temperature,
             max_retries=config.model.max_retries,
             timeout=config.model.timeout,
