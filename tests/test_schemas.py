@@ -3,7 +3,7 @@ from deo.agents.schemas import (
     PlanStep, PlanResult,
     FileChange, ImplementResult,
     ReviewIssue, ReviewResult,
-    TestResult, DocResult,
+    RunResult, DocResult,
 )
 
 def test_plan_result_roundtrip():
@@ -34,8 +34,8 @@ def test_implement_result_empty_caveats():
     assert r.caveats == []
 
 def test_test_result_all_pass():
-    r = TestResult(test_files=["tests/test_x.py"], coverage_estimate="87%",
-                   all_pass=True, failures=[])
+    r = RunResult(test_files=["tests/test_x.py"], coverage_estimate="87%",
+                  all_pass=True, failures=[])
     assert r.all_pass is True
 
 def test_doc_result():

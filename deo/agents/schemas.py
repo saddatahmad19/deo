@@ -43,7 +43,7 @@ class ReviewResult(BaseModel):
     verdict: str
 
 
-class TestResult(BaseModel):
+class RunResult(BaseModel):
     test_files: list[str]
     coverage_estimate: str
     all_pass: bool
