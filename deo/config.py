@@ -96,12 +96,20 @@ class ChromaConfig:
 
 @dataclass
 class SubagentToggles:
-    """Enable/disable individual subagents."""
+    """Enable/disable individual subagents and optionally override their model."""
     planner: bool = True
     implementer: bool = True
     reviewer: bool = True
     tester: bool = True
     documenter: bool = False
+
+    # Per-role model overrides. None = inherit orchestrator model.
+    # Example: "anthropic:claude-opus-4-7" or "anthropic:claude-haiku-4-5-20251001"
+    planner_model: str | None = None
+    implementer_model: str | None = None
+    reviewer_model: str | None = None
+    tester_model: str | None = None
+    documenter_model: str | None = None
 
 
 @dataclass
@@ -178,7 +186,11 @@ class DeoConfig:
 
         if "subagents" in data:
             s = data["subagents"]
-            for attr in ("planner", "implementer", "reviewer", "tester", "documenter"):
+            for attr in (
+                "planner", "implementer", "reviewer", "tester", "documenter",
+                "planner_model", "implementer_model", "reviewer_model",
+                "tester_model", "documenter_model",
+            ):
                 if attr in s:
                     setattr(self.subagents, attr, s[attr])
 
