@@ -45,6 +45,9 @@ def _write_if_missing(root: Path, relative: str, content: str, result: ProjectSe
 def _ensure_gitignore(root: Path, result: ProjectSetupResult) -> None:
     path = root / ".gitignore"
     patterns = [
+        "# Deo local state",
+        ".deo/",
+        "",
         "# Local secrets and credentials", ".env", ".env.*", "!.env.example",
         "*.pem", "*.key", "*.p12", "*.pfx", "",
         "# Operating system and editor files", ".DS_Store", "Thumbs.db", ".idea/", ".vscode/",
@@ -60,7 +63,7 @@ def _ensure_gitignore(root: Path, result: ProjectSetupResult) -> None:
         result.created.append(".gitignore")
         return
     existing = path.read_text(encoding="utf-8", errors="replace")
-    required = [".env", ".env.*", "!.env.example", "*.pem", "*.key"]
+    required = [".deo/", ".env", ".env.*", "!.env.example", "*.pem", "*.key"]
     missing = [line for line in required if line not in existing.splitlines()]
     if missing:
         with path.open("a", encoding="utf-8") as handle:

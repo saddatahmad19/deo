@@ -138,6 +138,25 @@ def _to_backend_path(root_dir: Path, path: Path) -> str | None:
     return f"/{rel.as_posix().rstrip('/')}/"
 
 
+def _install_builtin_skills(root_dir: Path) -> None:
+    """Copy packaged skills into the project-rooted Deep Agents backend.
+
+    Deep Agents resolves skill paths through its project backend, so package
+    paths outside root_dir cannot be passed directly as skill sources.
+    Existing project copies are never overwritten.
+    """
+    packaged_skills = Path(__file__).resolve().parents[1] / "skills"
+    if not packaged_skills.is_dir():
+        return
+    destination = root_dir / ".deo" / "skills"
+    for skill_file in packaged_skills.glob("*/SKILL.md"):
+        target = destination / skill_file.parent.name / "SKILL.md"
+        if target.exists():
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(skill_file.read_text(encoding="utf-8"), encoding="utf-8")
+
+
 def _resolve_skill_sources(root_dir: Path) -> list[str]:
     """
     Discover Deep Agents skill directories in priority order.
@@ -146,11 +165,8 @@ def _resolve_skill_sources(root_dir: Path) -> list[str]:
     after package-provided `deo/skills`.
     """
     candidates = [
-        # Built-in package skills are always available; project-local skills
-        # are loaded later and therefore take precedence.
-        Path(__file__).resolve().parents[1] / "skills",
-        root_dir / "deo" / "skills",
         root_dir / ".deo" / "skills",
+        root_dir / "deo" / "skills",
     ]
     discovered: list[str] = []
     for candidate in candidates:
@@ -215,6 +231,7 @@ def create_deo_agent(
     # ------------------------------------------------------------------
     # 4. Build subagents
     # ------------------------------------------------------------------
+    _install_builtin_skills(config.root_dir)
     skill_sources = _resolve_skill_sources(config.root_dir)
     subagents = build_subagents(
         enable_planner=config.subagents.planner,

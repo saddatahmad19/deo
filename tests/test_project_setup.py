@@ -17,6 +17,7 @@ def test_greenfield_setup_creates_shared_agent_context(tmp_path: Path):
     result = setup_project(tmp_path)
     assert result.greenfield
     assert (tmp_path / ".gitignore").exists()
+    assert ".deo/" in (tmp_path / ".gitignore").read_text(encoding="utf-8")
     assert (tmp_path / "README.md").exists()
     assert (tmp_path / "AGENTS.md").exists()
     assert (tmp_path / "CLAUDE.md").read_text(encoding="utf-8") == "@AGENTS.md\n"
