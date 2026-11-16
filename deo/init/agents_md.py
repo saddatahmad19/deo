@@ -162,7 +162,7 @@ def _build_user_message(root: Path, files: list[Path]) -> str:
     return "\n".join(lines)
 
 
-def generate_agents_md(root: Path, model_string: str = "anthropic:claude-haiku-4-5-20251001") -> tuple[str, list[Path]]:
+def generate_agents_md(root: Path, model_string: str = "freellmapi:auto:default") -> tuple[str, list[Path]]:
     """
     Analyse the repository at `root` and return:
       - agents_md_text: full AGENTS.md content
@@ -177,7 +177,20 @@ def generate_agents_md(root: Path, model_string: str = "anthropic:claude-haiku-4
     user_message = _build_user_message(root, important_files)
 
     provider, _, name = model_string.partition(":")
-    llm = init_chat_model(model=name, model_provider=provider, temperature=0.2)
+    if provider in ("freellmapi", "freellmapi_openai"):
+        from langchain_openai import ChatOpenAI
+
+        api_key = os.environ.get("FREELLMAPI_API_KEY") or os.environ.get("OPENAI_API_KEY")
+        if not api_key:
+            raise ValueError("Set FREELLMAPI_API_KEY to generate project instructions with FreeLLMAPI.")
+        llm = ChatOpenAI(
+            model=name,
+            api_key=api_key,
+            base_url=os.environ.get("FREELLMAPI_BASE_URL", "http://localhost:3001/v1"),
+            temperature=0.2,
+        )
+    else:
+        llm = init_chat_model(model=name, model_provider=provider, temperature=0.2)
 
     response = llm.invoke([
         SystemMessage(content=_SYSTEM_PROMPT),

@@ -144,9 +144,10 @@ class StreamDisplay:
                 display.handle_chunk(chunk)
     """
 
-    def __init__(self, show_tool_calls: bool = True, show_thinking: bool = False) -> None:
+    def __init__(self, show_tool_calls: bool = True, show_thinking: bool = False, output_callback=None) -> None:
         self.show_tool_calls = show_tool_calls
         self.show_thinking = show_thinking
+        self.output_callback = output_callback
         self._in_tool = False
         self._current_tool_name = ""
 
@@ -192,14 +193,24 @@ class StreamDisplay:
                     elif block.get("type") == "thinking" and self.show_thinking:
                         thinking_text = block.get("thinking", "")
                         if thinking_text:
-                            console.print(f"[deo.thinking]💭 {thinking_text[:200]}...[/]")
+                            rendered = f"💭 {thinking_text[:200]}...\n"
+                            if self.output_callback:
+                                self.output_callback(rendered)
+                            else:
+                                console.print(f"[deo.thinking]{rendered}[/]")
 
     def _stream_text(self, text: str) -> None:
-        console.print(text, end="", markup=False, highlight=False)
+        if self.output_callback:
+            self.output_callback(text)
+        else:
+            console.print(text, end="", markup=False, highlight=False)
 
     def _flush_content(self) -> None:
         """Flush any remaining buffered content."""
-        console.print("")  # Ensure newline after streaming
+        if self.output_callback:
+            self.output_callback("\n")
+        else:
+            console.print("")  # Ensure newline after streaming
 
     def _print_tool_call(self, tool_call: dict) -> None:
         name = tool_call.get("name", "unknown")
@@ -245,10 +256,13 @@ class StreamDisplay:
             if len(args) > 1:
                 arg_summary += f"[dim] +{len(args)-1} more[/]"
 
-        console.print(
-            f"\n[deo.tool]{icon} [bold]{name}[/][/] {arg_summary}",
-            highlight=False,
-        )
+        if self.output_callback:
+            self.output_callback(f"\n{icon} {name}\n")
+        else:
+            console.print(
+                f"\n[deo.tool]{icon} [bold]{name}[/][/] {arg_summary}",
+                highlight=False,
+            )
 
     def handle_subagent_spawn(self, agent_name: str, task: str) -> None:
         """Display when the orchestrator spawns a subagent."""

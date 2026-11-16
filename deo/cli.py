@@ -15,6 +15,7 @@ Commands:
 from __future__ import annotations
 
 import sys
+import time
 import uuid
 from pathlib import Path
 from typing import Any, Optional
@@ -43,7 +44,8 @@ SLASH_COMMANDS: list[SlashCommand] = [
     SlashCommand("clear",    "Clear the terminal screen"),
     SlashCommand("status",   "Show index status and session info", aliases=["index-status"]),
     SlashCommand("index",    "Re-index the codebase"),
-    SlashCommand("init",     "Generate AGENTS.md and index important files into a named Chroma collection"),
+    SlashCommand("init",     "Set up AGENTS.md, CLAUDE.md, and the project index"),
+    SlashCommand("sync",     "Refresh the project index; use deo sync --watch to keep it current"),
     SlashCommand("profile",  "Switch agent profile", usage="profile <name>"),
     SlashCommand("profiles", "List available agent profiles"),
     SlashCommand("exit",     "Exit Deo", aliases=["quit", "q"]),
@@ -80,7 +82,7 @@ def _print_help(commands: list[SlashCommand]) -> None:
 
 app = typer.Typer(
     name="deo",
-    help="Deo — Terminal AI coding agent powered by Deep Agents + ChromaDB",
+    help="Deo — Full-screen multi-agent engineering harness powered by Deep Agents",
     add_completion=False,
     rich_markup_mode="rich",
 )
@@ -137,19 +139,14 @@ def _initialize(
             config=config.chroma,
         )
 
-        # Index codebase
+        # Always run the incremental indexer at startup. It hashes files,
+        # indexes only changes, and removes deleted paths from the collection.
         if config.chroma.auto_index:
             n_existing = manager.count()
-            if n_existing == 0 or force_reindex:
-                if not quiet:
-                    print_info("Indexing codebase for semantic search...")
-                _run_index(indexer, quiet=quiet)
-            else:
-                if not quiet:
-                    print_info(
-                        f"Using existing index: {n_existing} chunks across "
-                        f"{len(manager.get_indexed_files())} files"
-                    )
+            if not quiet:
+                label = "Refreshing" if n_existing else "Building"
+                print_info(f"{label} semantic code index...")
+            _run_index(indexer, quiet=quiet, force=force_reindex)
     except Exception as e:
         if not quiet:
             print_warning(
@@ -169,7 +166,7 @@ def _initialize(
     return manager, indexer, agent
 
 
-def _run_index(indexer: Any, quiet: bool = False) -> None:
+def _run_index(indexer: Any, quiet: bool = False, force: bool = False) -> None:
     """Run codebase indexing with progress display."""
     from deo.tui.display import make_index_progress
 
@@ -185,7 +182,7 @@ def _run_index(indexer: Any, quiet: bool = False) -> None:
             )
 
         result = indexer.index(
-            force=False,
+            force=force,
             progress_callback=on_progress if not quiet else None,
         )
 
@@ -193,41 +190,39 @@ def _run_index(indexer: Any, quiet: bool = False) -> None:
         print_success(str(result))
 
 
-def _run_init(config: DeoConfig, quiet: bool = False) -> None:
-    """Generate AGENTS.md and index important files into a named Chroma collection."""
-    from deo.init.agents_md import generate_agents_md
-    from deo.init.repo_indexer import index_important_files
+def _run_init(config: DeoConfig, quiet: bool = False, force: bool = False) -> None:
+    """Set up shared agent docs and build/update the project's normal index."""
+    from deo.init.project_setup import setup_project
+    from deo.memory.chroma_manager import ChromaManager
+    from deo.memory.indexer import CodebaseIndexer
 
     root = config.root_dir
-    agents_md_path = root / config.agents_md_path
-
     if not quiet:
-        print_info(f"Analysing repository: {root.name} ...")
+        print_info(f"Setting up project: {root}")
 
-    agents_md_text, important_files = generate_agents_md(
-        root=root,
-        model_string=config.model.model_string,
-    )
-
-    agents_md_path.write_text(agents_md_text, encoding="utf-8")
-    if not quiet:
-        print_success(f"Wrote {agents_md_path} ({len(agents_md_text)} chars)")
-
-    if not quiet:
-        print_info(f"Indexing {len(important_files)} important files into Chroma ...")
+    result = setup_project(root, model_string=config.model.model_string, force=force)
+    for path in result.created:
+        if not quiet:
+            print_success(f"Created/updated {path}")
+    for path in result.preserved:
+        if not quiet:
+            print_info(f"Preserved {path}")
+    for note in result.notes:
+        if not quiet:
+            print_warning(note)
 
     try:
-        collection_name, n_chunks = index_important_files(
-            root=root,
-            important_files=important_files,
+        manager = ChromaManager(
+            persist_path=config.chroma_persist_path,
+            collection_name=config.chroma.collection_name,
         )
+        indexer = CodebaseIndexer(root=root, manager=manager, config=config.chroma)
         if not quiet:
-            print_success(
-                f"Indexed {n_chunks} chunks into collection [bold]{collection_name}[/]"
-            )
-    except Exception as e:
+            print_info("Building or refreshing the project-wide semantic index...")
+        _run_index(indexer, quiet=quiet)
+    except Exception as exc:
         if not quiet:
-            print_warning(f"Chroma indexing failed: {e}")
+            print_warning(f"Semantic indexing unavailable: {exc}")
 
 
 # ---------------------------------------------------------------------------
@@ -240,6 +235,7 @@ def _stream_agent_response(
     thread_id: str,
     show_tool_calls: bool = True,
     show_thinking: bool = False,
+    output_callback=None,
 ) -> str:
     """
     Stream the agent response and display it using Rich.
@@ -249,6 +245,7 @@ def _stream_agent_response(
     display = StreamDisplay(
         show_tool_calls=show_tool_calls,
         show_thinking=show_thinking,
+        output_callback=output_callback,
     )
 
     config = {"configurable": {"thread_id": thread_id}}
@@ -275,9 +272,15 @@ def _stream_agent_response(
                                 final_content += block.get("text", "")
 
     except KeyboardInterrupt:
-        console.print("\n[dim]⚡ Interrupted[/]")
+        if output_callback:
+            output_callback("\n⚡ Interrupted\n")
+        else:
+            console.print("\n[dim]⚡ Interrupted[/]")
     except Exception as e:
-        print_error(f"Agent error: {e}")
+        if output_callback:
+            output_callback(f"\nAgent error: {e}\n")
+        else:
+            print_error(f"Agent error: {e}")
         raise
 
     return final_content
@@ -322,7 +325,7 @@ def _handle_slash_command(
         result = index_status.invoke({})
         console.print(result)
 
-    elif command == "/index":
+    elif command in ("/index", "/sync"):
         if indexer is None:
             print_warning("Chroma is unavailable. Skipping index.")
         else:
@@ -384,7 +387,7 @@ def _handle_slash_command(
 def main(
     ctx: typer.Context,
     prompt: Optional[str] = typer.Option(None, "--prompt", "-q", help="One-shot prompt (omit for interactive REPL)"),
-    model: Optional[str] = typer.Option(None, "--model", "-m", help="Model string (e.g. anthropic:claude-sonnet-4-6)"),
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="Model string (default: freellmapi:auto:default; override with provider:model)"),
     profile: str = typer.Option("default", "--profile", "-p", help="Agent profile to use"),
     no_index: bool = typer.Option(False, "--no-index", help="Skip auto-indexing on startup"),
     force_index: bool = typer.Option(False, "--force-index", help="Force full re-index on startup"),
@@ -459,59 +462,95 @@ def main(
         raise typer.Exit()
 
     # -----------------------------------------------------------------------
-    # Interactive REPL
-    # -----------------------------------------------------------------------
-    print_banner(
-        session_id=session_id,
-        model=config.model.model_string,
-        root_dir=str(project_root),
-        n_indexed=manager.count() if manager is not None else 0,
-    )
-
+    # Interactive terminal application. Use the full-screen alternate-screen
+    # UI on real terminals; preserve a simple prompt fallback for pipes/CI.
     thread_id = session_id
-    prompt_session = build_prompt_session(
-        commands=SLASH_COMMANDS,
-        session_id=session_id,
-        model=config.model.model_string,
-        cwd=str(project_root),
-        get_n_indexed=lambda: manager.count() if manager is not None else 0,
-    )
-
-    while True:
-        try:
-            user_input = prompt_session.prompt(make_prompt_message).strip()
-        except KeyboardInterrupt:
-            console.print("[dim]Interrupted. Use /exit to quit.[/]")
-            continue
-        except EOFError:
-            console.print("[dim]Goodbye.[/]")
-            break
-
-        if not user_input:
-            continue
-
-        # Handle slash commands
-        if user_input.startswith("/"):
-            should_continue, manager, indexer, agent = _handle_slash_command(
-                user_input, config, manager, indexer, agent, session_id
-            )
-            if not should_continue:
+    if not sys.stdin.isatty() or not sys.stdout.isatty():
+        print_banner(
+            session_id=session_id,
+            model=config.model.model_string,
+            root_dir=str(project_root),
+            n_indexed=manager.count() if manager is not None else 0,
+        )
+        prompt_session = build_prompt_session(
+            commands=SLASH_COMMANDS,
+            session_id=session_id,
+            model=config.model.model_string,
+            cwd=str(project_root),
+            get_n_indexed=lambda: manager.count() if manager is not None else 0,
+        )
+        while True:
+            try:
+                user_input = prompt_session.prompt(make_prompt_message).strip()
+            except (KeyboardInterrupt, EOFError):
                 break
-            continue
+            if not user_input:
+                continue
+            if user_input.startswith("/"):
+                should_continue, manager, indexer, agent = _handle_slash_command(
+                    user_input, config, manager, indexer, agent, session_id
+                )
+                if not should_continue:
+                    break
+                continue
+            print_rule()
+            _stream_agent_response(
+                agent,
+                messages=[{"role": "user", "content": user_input}],
+                thread_id=thread_id,
+                show_tool_calls=show_tools,
+                show_thinking=config.display.show_thinking,
+            )
+            print_rule()
+        return
 
-        # Stream agent response — only pass the new message; MemorySaver
-        # holds prior history in the checkpointer under thread_id.
-        print_rule()
+    from deo.tui.fullscreen import FullScreenTUI
 
+    state = {"manager": manager, "indexer": indexer, "agent": agent}
+    tui = None
+
+    def handle_tui_input(user_input: str, write) -> None:
+        if user_input.startswith("/"):
+            slash = user_input.strip().lower()
+            if slash in ("/exit", "/quit", "/q"):
+                tui.request_exit()
+                return
+            if slash == "/clear":
+                tui.clear_transcript()
+                return
+            with console.capture() as capture:
+                _, state["manager"], state["indexer"], state["agent"] = _handle_slash_command(
+                    user_input,
+                    config,
+                    state["manager"],
+                    state["indexer"],
+                    state["agent"],
+                    session_id,
+                )
+            rendered = capture.get()
+            if rendered:
+                write(rendered)
+            return
+
+        write("─" * 48 + "\n")
         _stream_agent_response(
-            agent,
+            state["agent"],
             messages=[{"role": "user", "content": user_input}],
             thread_id=thread_id,
             show_tool_calls=show_tools,
             show_thinking=config.display.show_thinking,
+            output_callback=write,
         )
+        write("\n" + "─" * 48 + "\n")
 
-        print_rule()
+    tui = FullScreenTUI(
+        project=project_root.name or str(project_root),
+        model=config.model.model_string,
+        session_id=session_id,
+        indexed_chunks=lambda: state["manager"].count() if state["manager"] is not None else 0,
+        on_submit=handle_tui_input,
+    )
+    tui.run()
 
 
 @app.command("index")
@@ -539,7 +578,7 @@ def index_command(
     indexer = CodebaseIndexer(root=project_root, manager=manager, config=config.chroma)
 
     print_info(f"Indexing: {project_root}")
-    _run_index(indexer, quiet=False)
+    _run_index(indexer, quiet=False, force=force)
 
 
 @app.command("status")
@@ -583,14 +622,48 @@ def status_command(
 def init_command(
     root: Optional[str] = typer.Option(None, "--root", "-r", help="Project root directory"),
     model: Optional[str] = typer.Option(None, "--model", "-m", help="Model override for analysis"),
+    force: bool = typer.Option(False, "--force", help="Regenerate AGENTS.md even when it already exists"),
 ) -> None:
-    """Generate AGENTS.md and index important files into a named Chroma collection."""
+    """Set up agent context and build/update the project-wide semantic index."""
     project_root = Path(root).resolve() if root else find_project_root()
     config = DeoConfig.load(project_root)
     if model:
         config.model.override(model)
     config.ensure_deo_dir()
-    _run_init(config, quiet=False)
+    _run_init(config, quiet=False, force=force)
+
+
+@app.command("sync")
+def sync_command(
+    watch: bool = typer.Option(False, "--watch", "-w", help="Keep checking for file changes continuously"),
+    interval: float = typer.Option(3.0, "--interval", min=1.0, help="Seconds between watch refreshes"),
+    root: Optional[str] = typer.Option(None, "--root", "-r", help="Project root directory"),
+) -> None:
+    """Incrementally sync the project index; optionally keep it updated in watch mode."""
+    from deo.memory.chroma_manager import ChromaManager
+    from deo.memory.indexer import CodebaseIndexer
+
+    project_root = Path(root).resolve() if root else find_project_root()
+    config = DeoConfig.load(project_root)
+    config.ensure_deo_dir()
+    try:
+        manager = ChromaManager(config.chroma_persist_path, config.chroma.collection_name)
+    except Exception as exc:
+        print_error(f"Cannot connect to ChromaDB: {exc}")
+        raise typer.Exit(1)
+    indexer = CodebaseIndexer(project_root, manager, config.chroma)
+    if not watch:
+        _run_index(indexer, quiet=False)
+        return
+    print_info(f"Watching {project_root} for changes (Ctrl+C to stop)...")
+    try:
+        while True:
+            result = indexer.index(force=False)
+            if result.files_indexed or result.errors:
+                print_success(str(result))
+            time.sleep(interval)
+    except KeyboardInterrupt:
+        print_info("Stopped project index watcher.")
 
 
 @app.command("config")

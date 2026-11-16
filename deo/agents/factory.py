@@ -60,6 +60,27 @@ def _build_model(config: DeoConfig) -> Any:
     elif provider in ("azure", "azure_openai"):
         provider = "azure_openai"
 
+    if provider in ("freellmapi", "freellmapi_openai"):
+        from langchain_openai import ChatOpenAI
+
+        api_key = os.environ.get("FREELLMAPI_API_KEY") or os.environ.get("OPENAI_API_KEY")
+        if not api_key:
+            raise ValueError(
+                "FreeLLMAPI requires FREELLMAPI_API_KEY (your unified gateway key). "
+                "Set FREELLMAPI_BASE_URL if your gateway is not at http://localhost:3001/v1."
+            )
+        return ChatOpenAI(
+            model=name,
+            api_key=api_key,
+            base_url=os.environ.get(
+                "FREELLMAPI_BASE_URL",
+                os.environ.get("OPENAI_BASE_URL", "http://localhost:3001/v1"),
+            ),
+            temperature=config.model.temperature,
+            max_retries=config.model.max_retries,
+            timeout=config.model.timeout,
+        )
+
     if provider == "openrouter":
         from langchain_openai import ChatOpenAI
         return ChatOpenAI(
@@ -125,6 +146,9 @@ def _resolve_skill_sources(root_dir: Path) -> list[str]:
     after package-provided `deo/skills`.
     """
     candidates = [
+        # Built-in package skills are always available; project-local skills
+        # are loaded later and therefore take precedence.
+        Path(__file__).resolve().parents[1] / "skills",
         root_dir / "deo" / "skills",
         root_dir / ".deo" / "skills",
     ]

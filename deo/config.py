@@ -29,8 +29,8 @@ else:
 @dataclass
 class ModelConfig:
     """LLM model configuration."""
-    provider: str = "anthropic"
-    name: str = "claude-sonnet-4-6"
+    provider: str = "freellmapi"
+    name: str = "auto:default"
     max_retries: int = 6
     timeout: int = 120
     temperature: float = 0.0
@@ -45,8 +45,16 @@ class ModelConfig:
             return
         if ":" in model_string:
             provider, name = model_string.split(":", 1)
-            self.provider = provider
-            self.name = name
+            known_providers = {
+                "anthropic", "openai", "google", "gemini", "google_genai",
+                "azure", "azure_openai", "openrouter", "freellmapi",
+            }
+            if provider.lower().replace("-", "_") in known_providers:
+                self.provider = provider
+                self.name = name
+            else:
+                # FreeLLMAPI routing IDs such as auto:default are model IDs.
+                self.name = model_string
         else:
             self.name = model_string
 
@@ -224,13 +232,14 @@ class DeoConfig:
 
 [model]
 # provider options:
-#   anthropic   → ANTHROPIC_API_KEY       (claude-sonnet-4-6, claude-opus-4-7)
-#   openai      → OPENAI_API_KEY          (gpt-4o, gpt-4o-mini, o3-mini)
-#   gemini      → GOOGLE_API_KEY          (gemini-2.5-pro, gemini-2.0-flash)
-#   azure       → AZURE_OPENAI_API_KEY + AZURE_OPENAI_ENDPOINT  (deployment name)
-#   openrouter  → OPENROUTER_API_KEY      (openai/gpt-4o, anthropic/claude-3-5-sonnet)
-provider = "anthropic"
-name = "claude-sonnet-4-6"   # model name (or deployment name for azure)
+#   freellmapi  → FREELLMAPI_API_KEY + FREELLMAPI_BASE_URL (OpenAI-compatible gateway)
+#   anthropic   → ANTHROPIC_API_KEY
+#   openai      → OPENAI_API_KEY
+#   gemini      → GOOGLE_API_KEY
+#   azure       → AZURE_OPENAI_API_KEY + AZURE_OPENAI_ENDPOINT
+#   openrouter  → OPENROUTER_API_KEY
+provider = "freellmapi"
+name = "auto:default"        # FreeLLMAPI automatic default routing profile
 max_retries = 6
 timeout = 120
 temperature = 0.0
@@ -251,11 +260,11 @@ tester = true
 documenter = false
 
 # Optional: override the model for individual subagents (inherits orchestrator model if unset)
-# planner_model = "anthropic:claude-sonnet-4-6"
-# implementer_model = "anthropic:claude-opus-4-7"
-# reviewer_model = "anthropic:claude-haiku-4-5-20251001"
-# tester_model = "anthropic:claude-haiku-4-5-20251001"
-# documenter_model = "anthropic:claude-haiku-4-5-20251001"
+# planner_model = "freellmapi:auto:default"
+# implementer_model = "freellmapi:auto:default"
+# reviewer_model = "freellmapi:auto:default"
+# tester_model = "freellmapi:auto:default"
+# documenter_model = "freellmapi:auto:default"
 
 [display]
 theme = "dark"

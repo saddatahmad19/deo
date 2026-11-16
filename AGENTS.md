@@ -1,56 +1,60 @@
-# Project: deo
+# Project: Deo
 
 ## Purpose
-Deo is a terminal-native AI coding agent powered by Deep Agents and ChromaDB. It orchestrates a multi-agent pipeline (planner, implementer, reviewer, tester, documenter) to handle complex coding tasks with semantic codebase search, real shell access, and persistent project context.
+Deo is a full-screen, terminal-native multi-agent software engineering harness built on Deep Agents, LangGraph, and ChromaDB. It plans, implements, reviews, tests, and documents code while maintaining an incremental semantic index and shared project context.
 
 ## Architecture
-- **Orchestrator Agent** (`deo/agents/factory.py`) — Senior engineer dispatcher coordinating specialized subagents via DeepAgents' `task` tool
-- **Subagents** (`deo/agents/subagents.py`) — Five specialized roles (planner, implementer, reviewer, tester, documenter), each with focused system prompts and Pydantic response schemas
-- **ChromaDB Integration** (`deo/memory/`) — Incremental semantic indexing of codebase; agents search before coding via `semantic_search` tool
-- **CLI/TUI** (`deo/cli.py`, `deo/tui/`) — Typer-based commands with prompt-toolkit REPL, Rich formatting, slash commands (`/help`, `/index`, `/profile`, etc.)
-- **Tool Registry** (`deo/tools/registry.py`) — Centralized tool management; git tools, ChromaDB search, extensible custom tools
-- **Config System** (`deo/config.py`) — Hierarchical TOML loading: defaults → `~/.deo/config.toml` → `.deo.toml` → CLI flags
-- **Agent Profiles** (`deo/agents/registry.py`) — Named configurations (default, fast, review, write-tests, full) for quick mode switching
+- **CLI and session lifecycle** — deo/cli.py wires project discovery, configuration, indexing, agent construction, slash commands, and one-shot execution.
+- **Full-screen terminal UI** — deo/tui/fullscreen.py owns the alternate-screen transcript, pinned composer, live status HUD, slash completion, and asynchronous turn execution. deo/tui/display.py streams model/tool events; deo/tui/input.py is the non-TTY fallback.
+- **Model factory** — deo/agents/factory.py builds the orchestrator and subagents. FreeLLMAPI is the default OpenAI-compatible provider.
+- **Agent roles** — deo/agents/subagents.py, deo/agents/registry.py, and deo/prompts/ define the planner, implementer, reviewer, tester, documenter, profiles, and prompts.
+- **Project context/bootstrap** — deo/init/project_setup.py safely creates AGENTS.md, a CLAUDE.md import, and greenfield starter files. deo/skills/greenfield-bootstrap/SKILL.md describes the bootstrap workflow.
+- **Semantic memory** — deo/memory/indexer.py performs hash-based incremental indexing and deleted-file cleanup; deo/memory/chroma_manager.py persists chunk metadata and accesses Chroma Cloud.
+- **Tools** — deo/tools/ provides semantic search, indexing, and read-only Git context.
 
 ## Key Files
 | File | Responsibility |
 |------|-----------------|
-| `deo/cli.py` | Main entry point; REPL loop, slash commands, project root detection, initialization |
-| `deo/agents/factory.py` | Creates orchestrator and subagent instances; model initialization and tool binding |
-| `deo/agents/subagents.py` | Factory functions for each subagent with system prompts and response schemas |
-| `deo/agents/schemas.py` | Pydantic models for structured outputs (PlanResult, ImplementResult, ReviewResult, RunResult, DocResult) |
-| `deo/agents/middleware.py` | Custom middleware for appending runtime guidance to model requests |
-| `deo/config.py` | Configuration dataclasses and hierarchical loading logic |
-| `deo/memory/chroma_manager.py` | ChromaDB client initialization and collection management |
-| `deo/memory/indexer.py` | Incremental codebase indexing with language detection and chunking |
-| `deo/tools/registry.py` | Tool registration and filtering by tags/names |
-| `deo/tools/git_tools.py` | Git status, diff, log, branch tools for agent situational awareness |
-| `deo/tui/display.py` | Rich-based terminal output (banners, panels, formatted messages) |
-| `deo/tui/input.py` | prompt-toolkit REPL with slash command completion and status toolbar |
-| `deo/init/repo_indexer.py` | Chroma Cloud collection creation and file indexing for `deo init` command |
+| deo/cli.py | Typer CLI, startup indexing, interactive session, init and sync/watch commands |
+| deo/tui/fullscreen.py | Full-screen prompt_toolkit application |
+| deo/tui/display.py | Rich streaming and non-full-screen output |
+| deo/config.py | Hierarchical configuration and FreeLLMAPI defaults |
+| deo/agents/factory.py | Provider construction, skills, tools, and orchestrator assembly |
+| deo/agents/subagents.py | Specialized agent definitions |
+| deo/memory/indexer.py | Incremental project index and deletion reconciliation |
+| deo/memory/chroma_manager.py | Chroma collection operations and file hash cache |
+| deo/init/project_setup.py | Safe existing-project and greenfield initialization |
+| deo/init/agents_md.py | Evidence-based AGENTS.md generation |
+| deo/skills/greenfield-bootstrap/SKILL.md | New-repository bootstrap contract |
+| tests/ | Configuration, factory, schema, subagent, and project-setup tests |
 
 ## Conventions
-- **Model strings**: `"provider:name"` format (e.g., `"anthropic:claude-sonnet-4-6"`, `"openai:gpt-4o"`); split on `:` to extract provider and name
-- **Subagent response schemas**: All subagents return Pydantic models with structured fields; orchestrator parses and synthesizes into user-facing output
-- **Tool naming**: LangChain `@tool` decorators; names auto-derived from function names; git tools prefixed `git_`, chroma tools prefixed `semantic_`
-- **Config keys**: Snake_case in TOML (e.g., `implementer_model`, `chunk_size`); dataclass fields match exactly
-- **Project root detection**: Walk up from cwd looking for `.git`, `pyproject.toml`, `package.json`, `.deo.toml`, etc.; fall back to cwd
-- **Paths**: Use `Path` objects internally; convert to strings only for subprocess/API calls
-- **Error handling**: ChromaDB failures caught and logged; agent continues with graceful degradation (no index available)
-- **Skills**: Documented in `deo/skills/*.md` (safe-shell-execution, subagent-handoff, coding-workloop); agents reference these patterns
+- **Default model**: provider freellmapi, model ID auto:default; full model string freellmapi:auto:default.
+- **Model overrides**: recognize known provider prefixes only. IDs such as auto:default are valid model IDs and must not be split into provider auto and model default.
+- **FreeLLMAPI**: OpenAI-compatible base URL defaults to http://localhost:3001/v1; read the key from FREELLMAPI_API_KEY (fall back to OPENAI_API_KEY) and allow FREELLMAPI_BASE_URL override.
+- **Subagent models**: None inherits the orchestrator model; explicit role overrides are passed through build_subagents().
+- **Configuration**: snake_case TOML keys; precedence is defaults → ~/.deo/config.toml → project .deo.toml → CLI flags.
+- **Project docs**: preserve user-authored AGENTS.md and CLAUDE.md by default. CLAUDE.md may import shared rules using @AGENTS.md.
+- **Indexing**: use CodebaseIndexer.index(force=False) for incremental refreshes; it detects changed files and removes deleted paths. Avoid the legacy separate-collection initializer.
+- **TUI**: keep model execution off the prompt_toolkit event loop. Send streamed output back through the UI loop; never print directly to the terminal while the alternate screen is active.
+- **Tests**: add focused pytest coverage for model/config parsing, project setup, and CLI/index lifecycle changes.
 
 ## External Dependencies
-- **deepagents** ≥0.4.0 — Multi-agent orchestration with `task` tool and filesystem backend
-- **langchain** ≥0.3.0, **langgraph** ≥0.4.0 — LLM chains, graph workflows, checkpoint memory
-- **langchain-anthropic** ≥0.3.0 — Claude integration; also supports langchain-openai, langchain-google-genai
-- **chromadb** ≥0.6.0 — Vector database for semantic search; supports local and Cloud modes
-- **typer** ≥0.12.0, **rich** ≥13.0.0, **prompt-toolkit** ≥3.0.0 — CLI, TUI, and terminal formatting
-- **tiktoken** ≥0.7.0 — Token counting for prompt sizing
-- **pathspec** ≥0.12.0 — Gitignore-style pattern matching for exclusions
+- deepagents, langchain, langgraph — agent orchestration and model integration
+- langchain-openai — FreeLLMAPI and OpenAI-compatible providers (core dependency)
+- langchain-anthropic, langchain-google-genai — alternate model providers
+- chromadb — Chroma Cloud vector database
+- prompt-toolkit, rich, typer — full-screen TUI, formatting, and CLI
+- pathspec, python-dotenv, tiktoken — indexing exclusions, environment loading, and token utilities
+
+## Verification
+- python -m compileall -q deo tests
+- python -m pytest -q
 
 ## Agent Guidance
-- **Per-role model overrides**: Config allows `implementer_model`, `reviewer_model`, etc. to differ from orchestrator model; pass these to `build_subagents()` in factory. Tests verify this flow (`test_factory_models.py`).
-- **Subagent handoff contract**: Always include objective, scope, constraints, and deliverable format when delegating via `task` tool. Parallelize independent tasks; enforce sequencing for dependent ones.
-- **ChromaDB graceful degradation**: If Chroma init fails (missing API key, network error), log warning and continue; agents work without semantic search but lose codebase context.
-- **Slash command parsing**: Commands start with `/`; check for exact match first, then aliases. `/clear` and `/help` are special (no session context). `/profile <name>` requires argument parsing.
-- **Startup UI redesign**: `print_banner()` now renders a single framed Panel with DEO ASCII (cyan, centered), tagline (magenta), and footer stats (session, model, path, chunks). Remove separate `print_session_info()` call; merge all info into banner.
+- Do not commit API keys, .env, private keys, or certificates.
+- Do not choose a license for a greenfield project; ask the owner.
+- Do not fabricate architecture, test commands, or CI success in generated project context.
+- deo init preserves existing context files; use --force only when regeneration is requested.
+- deo sync --watch continuously refreshes the incremental index; Ctrl+C stops the watcher.
+- Verify terminal behavior in an actual TTY after changing prompt_toolkit layout or key bindings.

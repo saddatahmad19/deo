@@ -1,6 +1,6 @@
 # ⚡ Deo
 
-**A terminal-native AI coding tool** built on [Deep Agents](https://github.com/langchain-ai/deepagents) + [ChromaDB](https://github.com/chroma-core/chroma).
+**A full-screen, terminal-native multi-agent software engineering harness** built on [Deep Agents](https://github.com/langchain-ai/deepagents) + [ChromaDB](https://github.com/chroma-core/chroma).
 
 Think Claude Code, Codex, or OpenCode — but fully open source, model-agnostic, and with semantic codebase search built in.
 
@@ -22,6 +22,7 @@ Think Claude Code, Codex, or OpenCode — but fully open source, model-agnostic,
 - 🛠️ **Real shell access** — Runs tests, formatters, builds — anything you can run in a terminal
 - 📁 **Full filesystem access** — Read, write, edit files with DeepAgents' battle-tested filesystem backend
 - 🔌 **Model agnostic** — Works with Claude, GPT-4, Gemini, Ollama, and any LangChain-compatible model
+- 🖥️ **Full-screen TUI** — Persistent transcript, bottom-pinned composer, live model/index HUD, slash-command completion, and terminal resize support
 - 🎭 **Agent profiles** — Switch between `fast`, `review`, `write-tests`, `full` modes instantly
 - 📝 **AGENTS.md memory** — Project-specific context that persists across sessions
 - ⚙️ **Extensible** — Add custom tools, agents, and prompts via the registry system
@@ -36,12 +37,14 @@ pip install deo-agent
 uv add deo-agent
 ```
 
-Set your model API key:
+Set your FreeLLMAPI gateway credentials (the default provider):
 
 ```bash
-export ANTHROPIC_API_KEY="sk-..."
-# or OPENAI_API_KEY, GOOGLE_API_KEY, etc.
+export FREELLMAPI_BASE_URL="http://localhost:3001/v1"
+export FREELLMAPI_API_KEY="your-unified-key"
 ```
+
+FreeLLMAPI uses the OpenAI-compatible API and the auto:default routing profile by default. Set these in your local .env file if preferred. Other providers remain configurable.
 
 ---
 
@@ -170,8 +173,8 @@ Example `.deo.toml`:
 
 ```toml
 [model]
-provider = "anthropic"
-name = "claude-sonnet-4-6"
+provider = "freellmapi"
+name = "auto:default"
 temperature = 0.0
 
 [chroma]
@@ -191,6 +194,12 @@ show_tool_calls = true
 ```
 
 ---
+
+## Project setup and continuous indexing
+
+Run `deo init` in any project to create shared agent context, connect `CLAUDE.md` to `AGENTS.md`, and build or update the project index. Existing context files are preserved by default. Use `deo init --force` to regenerate AGENTS.md. Run `deo sync` for an incremental refresh, or `deo sync --watch` to keep the index current while you work. Startup indexing is incremental and checks changed and deleted files.
+
+For an empty directory, Deo applies a greenfield bootstrap: safe `.gitignore`, honest README and AGENTS.md starter, and a `CLAUDE.md` import. It deliberately does not choose a license, invent build commands, or create speculative CI/docs scaffolding.
 
 ## AGENTS.md
 

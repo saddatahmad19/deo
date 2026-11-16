@@ -43,6 +43,9 @@ dev = ["pytest", "pytest-asyncio", "ruff", "mypy"]
 [project.scripts]
 deo = "deo.cli:app"
 
+[tool.setuptools.package-data]
+deo = ["skills/*/SKILL.md"]
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["deo*"]
