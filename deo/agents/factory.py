@@ -159,10 +159,10 @@ def _install_builtin_skills(root_dir: Path) -> None:
 
 def _resolve_skill_sources(root_dir: Path) -> list[str]:
     """
-    Discover Deep Agents skill directories in priority order.
+    Discover project-rooted Deep Agents skill directories in priority order.
 
-    Later sources override earlier ones, so project-local `.deo/skills` is applied
-    after package-provided `deo/skills`.
+    Built-in skills are copied into .deo/skills first; repository-local
+    deo/skills is applied afterward and can override the packaged defaults.
     """
     candidates = [
         root_dir / ".deo" / "skills",

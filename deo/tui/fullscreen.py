@@ -54,10 +54,10 @@ class FullScreenTUI:
         )
 
         self.input = TextArea(
-            height=1,
+            height=3,
             prompt="❯ ",
-            multiline=False,
-            wrap_lines=False,
+            multiline=True,
+            wrap_lines=True,
             style="class:composer",
             history=InMemoryHistory(),
             completer=WordCompleter(["/help", "/status", "/index", "/init", "/sync", "/profiles", "/profile", "/clear", "/exit"], sentence=True),
@@ -82,7 +82,7 @@ class FullScreenTUI:
         )
         self.hint_bar = Window(
             content=FormattedTextControl(
-                [("class:hint", " Enter send  ·  / commands  ·  Ctrl+C quit  ·  Ctrl+L clear ")]
+                [("class:hint", " Enter send  ·  Ctrl+J newline  ·  / commands  ·  Ctrl+C quit  ·  Ctrl+L clear ")]
             ),
             height=1,
             style="class:hint",
@@ -90,6 +90,8 @@ class FullScreenTUI:
         self.key_bindings = KeyBindings()
         self.key_bindings.add("c-c")(self._exit)
         self.key_bindings.add("c-l")(self._clear)
+        self.key_bindings.add("enter")(self._submit_key)
+        self.key_bindings.add("c-j")(self._newline_key)
         self.application = Application(
             layout=Layout(
                 HSplit(
@@ -173,6 +175,12 @@ class FullScreenTUI:
             self.application.invalidate()
             if self.exit_requested:
                 self.application.exit()
+
+    def _submit_key(self, event) -> None:
+        event.current_buffer.validate_and_handle()
+
+    def _newline_key(self, event) -> None:
+        event.current_buffer.insert_text("\n")
 
     def _accept(self, buffer: Buffer) -> bool:
         prompt = buffer.text.strip()
