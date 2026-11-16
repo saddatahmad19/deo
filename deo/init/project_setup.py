@@ -15,7 +15,12 @@ class ProjectSetupResult:
     notes: list[str] = field(default_factory=list)
 
 
-_IGNORED_FOR_EMPTY_CHECK = {".git", ".deo", ".DS_Store", ".idea", ".vscode"}
+_IGNORED_FOR_EMPTY_CHECK = {
+    ".git", ".deo", ".DS_Store", ".idea", ".vscode", ".github",
+    ".gitignore", ".env", ".env.example", ".editorconfig",
+    "README.md", "LICENSE", "NOTICE", "pyproject.toml", "package.json",
+    "Cargo.toml", "go.mod", "pom.xml", "build.gradle", "Makefile",
+}
 
 
 def is_greenfield(root: Path) -> bool:

@@ -45,3 +45,10 @@ def test_existing_project_uses_observed_fallback_without_model_credentials(tmp_p
     generated = (tmp_path / "AGENTS.md").read_text(encoding="utf-8")
     assert "Observed Repository Surface" in generated
     assert any("missing gateway key" in note for note in result.notes)
+
+
+def test_fresh_git_repository_with_only_metadata_is_greenfield(tmp_path: Path):
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".gitignore").write_text(".env\n", encoding="utf-8")
+    (tmp_path / "README.md").write_text("# New project\n", encoding="utf-8")
+    assert is_greenfield(tmp_path)

@@ -506,8 +506,22 @@ def main(
 
     from deo.tui.fullscreen import FullScreenTUI
 
-    state = {"manager": manager, "indexer": indexer, "agent": agent}
+    state = {
+        "manager": manager,
+        "indexer": indexer,
+        "agent": agent,
+        # Chroma Cloud count is a network call. Cache it instead of querying
+        # the remote collection on every terminal repaint.
+        "chunks": manager.count() if manager is not None else 0,
+    }
     tui = None
+
+    def refresh_index_count() -> None:
+        if state["manager"] is not None:
+            try:
+                state["chunks"] = state["manager"].count()
+            except Exception:
+                pass
 
     def handle_tui_input(user_input: str, write) -> None:
         if user_input.startswith("/"):
@@ -530,6 +544,7 @@ def main(
             rendered = capture.get()
             if rendered:
                 write(rendered)
+            refresh_index_count()
             return
 
         write("─" * 48 + "\n")
@@ -541,13 +556,14 @@ def main(
             show_thinking=config.display.show_thinking,
             output_callback=write,
         )
+        refresh_index_count()
         write("\n" + "─" * 48 + "\n")
 
     tui = FullScreenTUI(
         project=project_root.name or str(project_root),
         model=config.model.model_string,
         session_id=session_id,
-        indexed_chunks=lambda: state["manager"].count() if state["manager"] is not None else 0,
+        indexed_chunks=lambda: state["chunks"],
         on_submit=handle_tui_input,
     )
     tui.run()
