@@ -17,7 +17,9 @@ import sys
 from contextlib import contextmanager
 from typing import Any, Iterator
 
-from rich.console import Console
+from pathlib import Path as _Path
+
+from rich.console import Console, Group
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
@@ -57,21 +59,38 @@ err_console = Console(theme=DEO_THEME, stderr=True)
 # ---------------------------------------------------------------------------
 
 BANNER = r"""
-  ██████╗ ███████╗ ██████╗
-  ██╔══██╗██╔════╝██╔═══██╗
-  ██║  ██║█████╗  ██║   ██║
-  ██║  ██║██╔══╝  ██║   ██║
-  ██████╔╝███████╗╚██████╔╝
-  ╚═════╝ ╚══════╝ ╚═════╝
-"""
+██████╗ ███████╗ ██████╗
+██╔══██╗██╔════╝██╔═══██╗
+██║  ██║█████╗  ██║   ██║
+██║  ██║██╔══╝  ██║   ██║
+██████╔╝███████╗╚██████╔╝
+╚═════╝ ╚══════╝ ╚═════╝"""
+
+TAGLINE = "The AI that codes while you think."
 
 
-def print_banner(version: str = "0.1.0") -> None:
-    console.print(Text(BANNER, style="deo.banner"))
-    console.print(
-        f"  Terminal AI Coding Agent  [dim]v{version}[/]  "
-        f"[dim]—  type [bold]/help[/] for commands[/]\n"
-    )
+def print_banner(
+    version: str = "0.1.0",
+    *,
+    session_id: str | None = None,
+    model: str | None = None,
+    root_dir: str | None = None,
+    n_indexed: int | None = None,
+) -> None:
+    art = Text(BANNER.strip(), style="bold cyan", justify="center")
+    tagline = Text(f"\n{TAGLINE}\n", style="bold magenta", justify="center")
+
+    if session_id is not None:
+        path = _Path(root_dir).name if root_dir else ""
+        n = n_indexed or 0
+        chunks = f"{n} chunk{'s' if n != 1 else ''}"
+        parts = [x for x in [f"session {session_id}", model, path, chunks] if x]
+        footer = Text("  ·  ".join(parts), style="dim white", justify="center")
+        content = Group(art, tagline, Rule(style="dim"), Text(""), footer)
+    else:
+        content = Group(art, tagline)
+
+    console.print(Panel(content, border_style="magenta", padding=(1, 4)))
 
 
 def print_rule(title: str = "") -> None:
@@ -256,52 +275,4 @@ def print_final_response(content: str) -> None:
     console.print(Markdown(content))
 
 
-def prompt_user(session_id: str) -> str:
-    """Get user input with a styled prompt."""
-    try:
-        return console.input(f"[deo.prompt]❯[/] ").strip()
-    except (EOFError, KeyboardInterrupt):
-        return "/exit"
 
-
-def print_session_info(session_id: str, model: str, root_dir: str, n_indexed: int) -> None:
-    """Print session metadata at startup."""
-    console.print(Panel(
-        f"[dim]session:[/] [bold]{session_id}[/]\n"
-        f"[dim]model:[/]   [bold]{model}[/]\n"
-        f"[dim]root:[/]    [deo.filepath]{root_dir}[/]\n"
-        f"[dim]index:[/]   [bold]{n_indexed}[/] chunks in semantic search",
-        title="[deo.banner]⚡ Deo Session[/]",
-        border_style="cyan",
-        padding=(0, 2),
-    ))
-
-
-# ---------------------------------------------------------------------------
-# Slash command help
-# ---------------------------------------------------------------------------
-
-HELP_TEXT = """\
-## Deo Commands
-
-| Command | Description |
-|---------|-------------|
-| `/help` | Show this help message |
-| `/clear` | Clear the terminal screen |
-| `/status` | Show index status and session info |
-| `/index` | Re-index the codebase |
-| `/profile <name>` | Switch agent profile |
-| `/profiles` | List available agent profiles |
-| `/exit` or `/quit` | Exit Deo |
-
-## Tips
-
-- Use **semantic_search** — Deo automatically searches your codebase before coding
-- Start complex tasks with a clear description; the planner will break it down
-- Add `AGENTS.md` to your project root with architecture notes for persistent context
-- Use `.deo.toml` in your project for project-specific config
-"""
-
-
-def print_help() -> None:
-    console.print(Markdown(HELP_TEXT))
