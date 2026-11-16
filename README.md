@@ -197,7 +197,7 @@ show_tool_calls = true
 
 ## Project setup and continuous indexing
 
-Run `deo init` in any project to create shared agent context, connect `CLAUDE.md` to `AGENTS.md`, and build or update the project index. Existing context files are preserved by default. Use `deo init --force` to regenerate AGENTS.md. Run `deo sync` for an incremental refresh, or `deo sync --watch` to keep the index current while you work. Startup indexing is incremental and checks changed and deleted files.
+Run `deo init` in any project to create shared agent context, connect `CLAUDE.md` to `AGENTS.md`, and build or update the project index. Existing context files are preserved by default. Use `deo init --force` to regenerate AGENTS.md, or `deo init --watch` to initialize and then keep the index current. Run `deo sync` for a one-shot incremental refresh, or `deo sync --watch` to watch an already initialized project. Startup indexing is incremental and checks changed and deleted files.
 
 For an empty directory, Deo applies a greenfield bootstrap: safe `.gitignore`, honest README and AGENTS.md starter, and a `CLAUDE.md` import. It deliberately does not choose a license, invent build commands, or create speculative CI/docs scaffolding.
 

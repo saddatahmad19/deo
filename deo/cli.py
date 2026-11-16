@@ -639,14 +639,18 @@ def init_command(
     root: Optional[str] = typer.Option(None, "--root", "-r", help="Project root directory"),
     model: Optional[str] = typer.Option(None, "--model", "-m", help="Model override for analysis"),
     force: bool = typer.Option(False, "--force", help="Regenerate AGENTS.md even when it already exists"),
+    watch: bool = typer.Option(False, "--watch", "-w", help="Keep the index synchronized after setup"),
+    interval: float = typer.Option(3.0, "--interval", min=1.0, help="Seconds between watch refreshes"),
 ) -> None:
-    """Set up agent context and build/update the project-wide semantic index."""
+    """Set up agent context and index the project; optionally keep it synchronized."""
     project_root = Path(root).resolve() if root else find_project_root()
     config = DeoConfig.load(project_root)
     if model:
         config.model.override(model)
     config.ensure_deo_dir()
     _run_init(config, quiet=False, force=force)
+    if watch:
+        sync_command(watch=True, interval=interval, root=str(project_root))
 
 
 @app.command("sync")

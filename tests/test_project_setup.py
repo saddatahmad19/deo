@@ -36,6 +36,7 @@ def test_setup_preserves_custom_claude_and_agents_files(tmp_path: Path):
 
 def test_existing_project_uses_observed_fallback_without_model_credentials(tmp_path: Path, monkeypatch):
     (tmp_path / "pyproject.toml").write_text("[project]\nname='sample'\n", encoding="utf-8")
+    (tmp_path / "main.py").write_text("print(1)\n", encoding="utf-8")
 
     def unavailable(*args, **kwargs):
         raise RuntimeError("missing gateway key")
