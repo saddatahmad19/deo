@@ -678,9 +678,12 @@ def sync_command(
     print_info(f"Watching {project_root} for changes (Ctrl+C to stop)...")
     try:
         while True:
-            result = indexer.index(force=False)
-            if result.files_indexed or result.errors:
-                print_success(str(result))
+            try:
+                result = indexer.index(force=False)
+                if result.files_indexed or result.errors:
+                    print_success(str(result))
+            except Exception as exc:
+                print_warning(f"Index refresh failed; will retry: {exc}")
             time.sleep(interval)
     except KeyboardInterrupt:
         print_info("Stopped project index watcher.")

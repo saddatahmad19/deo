@@ -128,6 +128,19 @@ No build, test, lint, or deployment command has been executed by Deo during this
 """
 
 
+def _install_packaged_skills(root: Path, result: ProjectSetupResult) -> None:
+    """Make bundled Deep Agents skills visible inside this project's backend."""
+    packaged = Path(__file__).resolve().parents[1] / "skills"
+    for skill_file in packaged.glob("*/SKILL.md"):
+        relative = Path(".deo") / "skills" / skill_file.parent.name / "SKILL.md"
+        target = root / relative
+        if target.exists():
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(skill_file.read_text(encoding="utf-8"), encoding="utf-8")
+        result.created.append(relative.as_posix())
+
+
 def setup_project(
     root: Path,
     model_string: str = "freellmapi:auto:default",
@@ -140,6 +153,7 @@ def setup_project(
     greenfield = is_greenfield(root)
     result = ProjectSetupResult(greenfield=greenfield)
     _ensure_gitignore(root, result)
+    _install_packaged_skills(root, result)
 
     agents_path = root / "AGENTS.md"
     if not agents_path.exists() or force:

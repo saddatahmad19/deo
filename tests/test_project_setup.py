@@ -20,6 +20,7 @@ def test_greenfield_setup_creates_shared_agent_context(tmp_path: Path):
     assert ".deo/" in (tmp_path / ".gitignore").read_text(encoding="utf-8")
     assert (tmp_path / "README.md").exists()
     assert (tmp_path / "AGENTS.md").exists()
+    assert (tmp_path / ".deo/skills/greenfield-bootstrap/SKILL.md").exists()
     assert (tmp_path / "CLAUDE.md").read_text(encoding="utf-8") == "@AGENTS.md\n"
     assert not (tmp_path / "LICENSE").exists()
 
