@@ -112,7 +112,7 @@ class SubagentToggles:
     documenter: bool = False
 
     # Per-role model overrides. None = inherit orchestrator model.
-    # Example: "anthropic:claude-opus-4-7" or "anthropic:claude-haiku-4-5-20251001"
+    # Example: "freellmapi:auto:default" or "openai:gpt-4o"
     planner_model: str | None = None
     implementer_model: str | None = None
     reviewer_model: str | None = None

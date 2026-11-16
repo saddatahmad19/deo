@@ -29,7 +29,7 @@ class AgentProfile:
     """
     name: str
     description: str
-    model_override: str | None = None           # "anthropic:claude-haiku-4-5-20251001"
+    model_override: str | None = None           # "freellmapi:auto:default"
     system_prompt_addon: str = ""               # Extra instructions for this profile
     enable_planner: bool = True
     enable_implementer: bool = True
