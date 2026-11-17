@@ -25,6 +25,50 @@ from deo.memory.indexer import CodebaseIndexer
 from deo.prompts.templates import ORCHESTRATOR_PROMPT
 from deo.tools.chroma_tools import CHROMA_TOOLS, configure_chroma_tools
 from deo.tools.git_tools import GIT_TOOLS, configure_git_tools
+from deo.tools.harness_tools import HARNESS_TOOLS, LEARNING_TOOLS, configure_harness_tools
+
+_ROLE_BY_AGENT = {
+    "planner-agent": "planner", "implementer-agent": "implementer", "reviewer-agent": "reviewer",
+    "tester-agent": "tester", "documenter-agent": "documenter",
+}
+
+
+def make_route_state(config: DeoConfig, session_id: str = "") -> Any:
+    """Shared per-session routing state, or None when not using FreeLLMAPI routing."""
+    if config.model.provider.lower().replace("-", "_") not in ("freellmapi", "freellmapi_openai"):
+        return None
+    if not config.routing.enabled:
+        return None
+    from deo.routing.freellmapi import RouteState
+
+    return RouteState(presets=dict(config.routing.presets), role_presets=dict(config.routing.role_presets),
+                      default_model=config.model.name, session_id=session_id,
+                      compress=config.routing.compress)
+
+
+def _resolve_subagent_models(config: DeoConfig, subagents: list[dict[str, Any]], route_state: Any) -> None:
+    """Turn per-role model strings into model objects.
+
+    Deep Agents resolves string models with init_chat_model, which cannot build
+    a FreeLLMAPI model, so FreeLLMAPI ids become RoutedChatOpenAI instances and
+    other providers are built through _build_model.
+    """
+    from copy import deepcopy
+
+    for spec in subagents:
+        role = _ROLE_BY_AGENT.get(spec.get("name", ""), spec.get("name", ""))
+        raw = spec.get("model")
+        if isinstance(raw, str):
+            sub = deepcopy(config)
+            sub.model.override(raw)
+            is_free = sub.model.provider.lower() in ("freellmapi", "freellmapi_openai")
+            if is_free and route_state is not None:
+                route_state.role_models[role] = sub.model.name
+                spec["model"] = _build_model(sub, role=role, route_state=route_state)
+            else:
+                spec["model"] = _build_model(sub)
+        elif raw is None and route_state is not None:
+            spec["model"] = _build_model(config, role=role, route_state=route_state)
 
 
 def _normalize_azure_endpoint_and_version(raw_endpoint: str) -> tuple[str, str | None]:
@@ -49,8 +93,12 @@ def _normalize_azure_endpoint_and_version(raw_endpoint: str) -> tuple[str, str |
     return normalized_endpoint, inferred_api_version
 
 
-def _build_model(config: DeoConfig) -> Any:
-    """Instantiate the LLM based on config.model.provider."""
+def _build_model(config: DeoConfig, role: str = "orchestrator", route_state: Any = None) -> Any:
+    """Instantiate the LLM based on config.model.provider.
+
+    For FreeLLMAPI with a route_state, returns a RoutedChatOpenAI that picks
+    its model id (auto:smart, auto:fast, ...) and routing headers per request.
+    """
     provider = config.model.provider.lower().replace("-", "_")
     name = config.model.name
 
@@ -69,7 +117,7 @@ def _build_model(config: DeoConfig) -> Any:
                 "FreeLLMAPI requires FREELLMAPI_API_KEY (your unified gateway key). "
                 "Set FREELLMAPI_BASE_URL if your gateway is not at http://localhost:3001/v1."
             )
-        return ChatOpenAI(
+        kwargs = dict(
             model=name,
             api_key=api_key,
             base_url=os.environ.get(
@@ -80,6 +128,11 @@ def _build_model(config: DeoConfig) -> Any:
             max_retries=config.model.max_retries,
             timeout=config.model.timeout,
         )
+        if route_state is None:
+            return ChatOpenAI(**kwargs)
+        from deo.routing.freellmapi import RoutedChatOpenAI
+        return RoutedChatOpenAI(**kwargs, include_response_headers=True,
+                                route_state=route_state, route_role=role)
 
     if provider == "openrouter":
         from langchain_openai import ChatOpenAI
@@ -187,6 +240,8 @@ def create_deo_agent(
     checkpointer: MemorySaver | None = None,
     extra_tools: list[Any] | None = None,
     extra_system_prompt: str = "",
+    route_state: Any = None,
+    learner: Any = None,
 ) -> Any:  # CompiledStateGraph
     """Build and return the Deo orchestrator agent."""
 
@@ -195,7 +250,11 @@ def create_deo_agent(
     # ------------------------------------------------------------------
     configure_git_tools(config.root_dir)
     if manager is not None and indexer is not None:
-        configure_chroma_tools(manager, indexer, n_results=config.chroma.n_results)
+        configure_chroma_tools(manager, indexer, n_results=config.chroma.n_results,
+                               dense_weight=config.chroma.dense_weight,
+                               max_per_file=config.chroma.max_chunks_per_file)
+        if learner is not None and config.learning.file_priors:
+            manager.file_prior = learner.files.prior
         chroma_tools = list(CHROMA_TOOLS)
     else:
         chroma_tools = []
@@ -206,8 +265,11 @@ def create_deo_agent(
     orchestrator_tools = [
         *chroma_tools,
         *GIT_TOOLS,
+        *(HARNESS_TOOLS if config.harnesses.enabled else []),
+        *(LEARNING_TOOLS if learner is not None else []),
         *(extra_tools or []),
     ]
+    configure_harness_tools(config.root_dir, config.harnesses, route_state, learner)
 
     # ------------------------------------------------------------------
     # 3. Build system prompt
@@ -249,7 +311,8 @@ def create_deo_agent(
     # ------------------------------------------------------------------
     # 5. Initialize model
     # ------------------------------------------------------------------
-    model = _build_model(config)
+    model = _build_model(config, role="orchestrator", route_state=route_state)
+    _resolve_subagent_models(config, subagents, route_state)
 
     # ------------------------------------------------------------------
     # 6. Create agent

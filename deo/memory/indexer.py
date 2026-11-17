@@ -27,6 +27,10 @@ except ImportError:
 
 from deo.config import ChromaConfig
 from deo.memory.chroma_manager import ChromaManager
+from deo.memory.chunking import chunk_source, contextual_header
+
+# Bump when chunking/metadata changes so existing indexes rebuild once.
+INDEX_VERSION = 2
 
 
 # ---------------------------------------------------------------------------
@@ -301,6 +305,14 @@ class CodebaseIndexer:
         """
         start = time.time()
         result = IndexResult()
+        meta_path = self.manager.persist_path / "index_meta.json"
+        try:
+            import json as _json
+            meta = _json.loads(meta_path.read_text()) if meta_path.exists() else {}
+        except (OSError, ValueError):
+            meta = {}
+        if meta.get("version") != INDEX_VERSION or self.manager.lexical.count() == 0:
+            force = True
 
         files = list(iter_indexable_files(self.root, self.config))
         total = len(files)
@@ -318,21 +330,7 @@ class CodebaseIndexer:
                     result.files_skipped += 1
                     continue
 
-                language = detect_language(path)
-                chunks, start_lines = chunk_file(
-                    content,
-                    language,
-                    self.config.chunk_size,
-                    self.config.chunk_overlap,
-                )
-
-                n = self.manager.add_chunks(
-                    filepath=rel_path,
-                    chunks=chunks,
-                    language=language,
-                    file_hash=fhash,
-                    start_lines=start_lines,
-                )
+                n = self._store(rel_path, content, fhash, detect_language(path))
                 result.files_indexed += 1
                 result.chunks_added += n
 
@@ -347,8 +345,23 @@ class CodebaseIndexer:
             if indexed_path not in current_rel_paths:
                 self.manager.remove_file(indexed_path)
 
+        try:
+            import json as _json
+            meta_path.write_text(_json.dumps({"version": INDEX_VERSION}))
+        except OSError:
+            pass
         result.elapsed_seconds = time.time() - start
         return result
+
+    def _store(self, rel_path: str, content: str, fhash: str, language: str) -> int:
+        chunks = chunk_source(content, language, self.config.chunk_size, self.config.chunk_overlap)
+        headers = getattr(self.config, "contextual_headers", True)
+        docs = [(contextual_header(rel_path, language, c) if headers else "") + c.text for c in chunks]
+        return self.manager.add_chunks(
+            filepath=rel_path, chunks=docs, language=language, file_hash=fhash,
+            start_lines=[c.start_line for c in chunks], end_lines=[c.end_line for c in chunks],
+            symbols=[c.symbol for c in chunks], kinds=[c.kind for c in chunks],
+        )
 
     def index_file(self, path: Path) -> int:
         """
@@ -358,19 +371,6 @@ class CodebaseIndexer:
             rel_path = str(path.relative_to(self.root))
             content = path.read_text(encoding="utf-8", errors="replace")
             fhash = file_hash(content)
-            language = detect_language(path)
-            chunks, start_lines = chunk_file(
-                content,
-                language,
-                self.config.chunk_size,
-                self.config.chunk_overlap,
-            )
-            return self.manager.add_chunks(
-                filepath=rel_path,
-                chunks=chunks,
-                language=language,
-                file_hash=fhash,
-                start_lines=start_lines,
-            )
+            return self._store(rel_path, content, fhash, detect_language(path))
         except Exception:
             return 0

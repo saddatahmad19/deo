@@ -102,6 +102,16 @@ class AgentRegistry:
         ))
 
         self.register(AgentProfile(
+            name="docs",
+            description="Orchestrator + documenter. Best for READMEs, docstrings and guides.",
+            enable_planner=False,
+            enable_implementer=False,
+            enable_reviewer=False,
+            enable_tester=False,
+            enable_documenter=True,
+        ))
+
+        self.register(AgentProfile(
             name="full",
             description="All agents including documenter.",
             enable_documenter=True,

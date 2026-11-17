@@ -195,6 +195,13 @@ show_tool_calls = true
 
 ---
 
+## FreeLLMAPI decision routing, harnesses and self-improvement
+
+- **Decision routes** — each turn is classified (question, quick_edit, feature, refactor, debug, review, tests, docs, research) by local heuristics plus FreeLLMAPI `POST /v1/decisions`, and mapped to a preset (`auto:smart`, `auto:fast`, `auto:balanced`, `auto:reliable`) and an agent profile. Roles get their own presets (planner/reviewer smart, tester reliable, documenter fast). `/route` explains the last decision; `/profile` pins, `/auto` unpins.
+- **External harnesses** — agents can `delegate_to_harness` to Aider (one-shot edits), Claude Code / Codex (agentic multi-file, debugging), Oh My Hermes `ulw-loop` (parallel build-until-pass), Reasonix / DeepSeek Harness (long context), Hermes (research), all pointed at the same gateway. `deo harnesses` shows readiness and the `npx freellmapi setup-<id>` command for each.
+- **Self-improvement** — every turn is recorded (route, served model from `X-Routed-Via`, tools, test pass/fail signals, files). A Thompson-sampling bandit learns which preset works per task category, successful files get a retrieval boost, and lessons (`record_lesson`, `/bad <note>`, `deo learn --distill`) are recalled into future turns. Agents can `save_skill` repeatable workflows. `/good`, `/bad`, `/learn`, `deo learn`.
+- **Hybrid RAG** — AST/declaration-aware chunks with contextual headers and symbol metadata, dense vectors fused with SQLite FTS5 BM25 (identifier-split) via weighted RRF, symbol boosts, per-file diversity cap, `search_symbol`. Works on Chroma Cloud or a local store when `CHROMA_*` is unset.
+
 ## Project setup and continuous indexing
 
 Run `deo init` in any project to create shared agent context, connect `CLAUDE.md` to `AGENTS.md`, and build or update the project index. Existing context files are preserved by default. Use `deo init --force` to regenerate AGENTS.md, or `deo init --watch` to initialize and then keep the index current. Run `deo sync` for a one-shot incremental refresh, or `deo sync --watch` to watch an already initialized project. Startup indexing is incremental and checks changed and deleted files.

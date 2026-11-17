@@ -19,18 +19,24 @@ if TYPE_CHECKING:
 _manager: "ChromaManager | None" = None
 _indexer: "CodebaseIndexer | None" = None
 _n_results: int = 8
+_dense_weight: float = 0.6
+_max_per_file: int = 2
 
 
 def configure_chroma_tools(
     manager: "ChromaManager",
     indexer: "CodebaseIndexer",
     n_results: int = 8,
+    dense_weight: float = 0.6,
+    max_per_file: int = 2,
 ) -> None:
     """Inject the ChromaDB manager and indexer. Call once during Deo startup."""
-    global _manager, _indexer, _n_results
+    global _manager, _indexer, _n_results, _dense_weight, _max_per_file
     _manager = manager
     _indexer = indexer
     _n_results = n_results
+    _dense_weight = dense_weight
+    _max_per_file = max_per_file
 
 
 @tool
@@ -67,14 +73,12 @@ def semantic_search(
 
     actual_n = n_results if n_results > 0 else _n_results
 
-    where_filter: dict | None = None
-    if language:
-        where_filter = {"language": language.lower()}
-
-    results = _manager.query(
+    results = _manager.hybrid_query(
         query_text=query,
-        n_results=actual_n,
-        where=where_filter,
+        n_results=actual_n * (3 if filepath_contains else 1),
+        language=language,
+        dense_weight=_dense_weight,
+        max_per_file=_max_per_file,
     )
 
     if not results:
@@ -93,11 +97,13 @@ def semantic_search(
         filepath = result["filepath"]
         start_line = result.get("start_line", 0)
         lang = result.get("language", "")
-        distance = result.get("distance", 1.0)
-        similarity_pct = round((1 - distance) * 100, 1)
+        symbols = result.get("symbols") or ""
 
         lines.append(f"{'─' * 60}")
-        lines.append(f"[{i}] 📄 {filepath}  (line ~{start_line})  [{lang}]  {similarity_pct}% match")
+        end_line = result.get("end_line") or ""
+        span = f"lines {start_line}-{end_line}" if end_line else f"line ~{start_line}"
+        sym = f"  ⟨{symbols}⟩" if symbols else ""
+        lines.append(f"[{i}] 📄 {filepath}  ({span})  [{lang}]{sym}")
         lines.append(f"{'─' * 60}")
 
         doc = result["document"]
@@ -216,4 +222,22 @@ def find_file(pattern: str) -> str:
     return result
 
 
-CHROMA_TOOLS = [semantic_search, add_to_index, index_status, find_file]
+@tool
+def search_symbol(name: str) -> str:
+    """
+    Find where a function, class or method is defined by name (exact, then partial).
+
+    Faster and more precise than semantic_search when you know the identifier,
+    e.g. "CodebaseIndexer.index" or "build_subagents".
+    """
+    if _manager is None:
+        return "❌ ChromaDB not initialized."
+    rows = _manager.lexical.find_symbol(name)
+    if not rows:
+        return f"No indexed symbol matching '{name}'."
+    return "\n".join(
+        f"📌 {r['filepath']}:{r['start_line']}-{r['end_line']}  {r['kind']}  ⟨{r['symbols']}⟩" for r in rows
+    )
+
+
+CHROMA_TOOLS = [semantic_search, search_symbol, add_to_index, index_status, find_file]

@@ -32,7 +32,11 @@ Deo is a full-screen, terminal-native multi-agent software engineering harness b
 - **Default model**: provider freellmapi, model ID auto:default; full model string freellmapi:auto:default.
 - **Model overrides**: recognize known provider prefixes only. IDs such as auto:default are valid model IDs and must not be split into provider auto and model default.
 - **FreeLLMAPI**: OpenAI-compatible base URL defaults to http://localhost:3001/v1; read the key from FREELLMAPI_API_KEY (fall back to OPENAI_API_KEY) and allow FREELLMAPI_BASE_URL override.
-- **Subagent models**: None inherits the orchestrator model; explicit role overrides are passed through build_subagents().
+- **Subagent models**: explicit `*_model` overrides win; otherwise, with FreeLLMAPI routing enabled, each role uses its `[routing].role_presets` preset (planner/reviewer auto:smart, tester auto:reliable, documenter auto:fast, others follow the per-turn decision). FreeLLMAPI model strings are resolved to RoutedChatOpenAI objects in factory._resolve_subagent_models (Deep Agents cannot init them from strings).
+- **Routing**: deo/routing/router.py decides category/preset/profile per turn (heuristics → FreeLLMAPI POST /v1/decisions → learned bandit); deo/session.py applies it. Send X-FreeLLM-Task-Type and X-Session-Id; read X-Routed-Via.
+- **Harnesses**: deo/harnesses/registry.py; only run a harness whose `--help` lists its probe flags, else require a [harnesses].commands override.
+- **Learning**: deo/learning/experience.py stores episodes/lessons as JSONL under .deo/experience/.
+- **RAG**: deo/memory/chunking.py (AST/declaration chunks, contextual headers), deo/memory/lexical.py (SQLite FTS5 BM25); ChromaManager.hybrid_query fuses dense + lexical with weighted RRF. Bump indexer.INDEX_VERSION when chunk format changes.
 - **Configuration**: snake_case TOML keys; precedence is defaults → ~/.deo/config.toml → project .deo.toml → CLI flags.
 - **Project docs**: preserve user-authored AGENTS.md and CLAUDE.md by default. CLAUDE.md may import shared rules using @AGENTS.md.
 - **Indexing**: use CodebaseIndexer.index(force=False) for incremental refreshes; it detects changed files and removes deleted paths. Avoid the legacy separate-collection initializer.

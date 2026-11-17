@@ -48,6 +48,12 @@ SLASH_COMMANDS: list[SlashCommand] = [
     SlashCommand("sync",     "Refresh the project index; use deo sync --watch to keep it current"),
     SlashCommand("profile",  "Switch agent profile", usage="profile <name>"),
     SlashCommand("profiles", "List available agent profiles"),
+    SlashCommand("auto",     "Return to automatic per-turn routing (unpin profile)"),
+    SlashCommand("route",    "Explain the routing decision for the last turn"),
+    SlashCommand("good",     "Mark the last turn as successful", usage="good [note]"),
+    SlashCommand("bad",      "Mark the last turn as failed; the note becomes a lesson", usage="bad [note]"),
+    SlashCommand("learn",    "Show what Deo has learned (routes, harnesses, lessons)"),
+    SlashCommand("harnesses", "List external harnesses and readiness"),
     SlashCommand("exit",     "Exit Deo", aliases=["quit", "q"]),
 ]
 
@@ -111,10 +117,16 @@ def find_project_root(start: Path | None = None) -> Path:
 # Initialization
 # ---------------------------------------------------------------------------
 
+_SESSION: Any = None  # deo.session.DeoSession for the running process
+
+
 def _initialize(
     config: DeoConfig,
     force_reindex: bool = False,
     quiet: bool = False,
+    profile: str = "default",
+    pinned: bool = False,
+    session_id: str = "",
 ) -> tuple[Any, Any, Any]:  # (manager, indexer, agent)
     """Initialize ChromaDB, indexer, and the orchestrator agent."""
     from deo.agents.factory import create_deo_agent
@@ -131,6 +143,7 @@ def _initialize(
         manager = ChromaManager(
             persist_path=config.chroma_persist_path,
             collection_name=config.chroma.collection_name,
+            mode=config.chroma.mode,
         )
 
         indexer = CodebaseIndexer(
@@ -154,14 +167,13 @@ def _initialize(
                 f"({e})."
             )
 
-    # Build agent
-    checkpointer = MemorySaver()
-    agent = create_deo_agent(
-        config=config,
-        manager=manager,
-        indexer=indexer,
-        checkpointer=checkpointer,
-    )
+    # Build the session (router + learner + agent pool) and the starting agent.
+    global _SESSION
+    from deo.session import DeoSession
+
+    _SESSION = DeoSession(config, manager, indexer, session_id or str(uuid.uuid4())[:8],
+                          profile=profile, pinned=pinned)
+    agent = _SESSION.agent_for(profile)
 
     return manager, indexer, agent
 
@@ -250,6 +262,20 @@ def _stream_agent_response(
 
     config = {"configurable": {"thread_id": thread_id}}
     final_content = ""
+    session = _SESSION
+    if session is not None and messages and messages[-1].get("role") == "user":
+        try:
+            agent, augmented, summary = session.prepare_turn(messages[-1]["content"])
+            messages = [*messages[:-1], {"role": "user", "content": augmented}]
+            if output_callback:
+                output_callback(summary + "\n")
+            else:
+                console.print(f"[dim]{summary}[/]")
+        except Exception as exc:  # routing must never block a turn
+            session = None
+            if output_callback:
+                output_callback(f"(routing unavailable: {exc})\n")
+    turn_error: str | None = None
 
     try:
         with display.streaming_context():
@@ -259,6 +285,8 @@ def _stream_agent_response(
                 stream_mode="messages",
             ):
                 display.handle_stream_chunk(chunk)
+                if session is not None:
+                    session.observe(chunk)
 
                 # Accumulate final content for return value
                 if isinstance(chunk, tuple) and len(chunk) == 2:
@@ -277,11 +305,18 @@ def _stream_agent_response(
         else:
             console.print("\n[dim]⚡ Interrupted[/]")
     except Exception as e:
+        turn_error = str(e)
         if output_callback:
             output_callback(f"\nAgent error: {e}\n")
         else:
             print_error(f"Agent error: {e}")
         raise
+    finally:
+        if session is not None:
+            try:
+                session.end_turn(turn_error)
+            except Exception:
+                pass
 
     return final_content
 
@@ -342,9 +377,51 @@ def _handle_slash_command(
             console.print(f"  [bold cyan]{p.name}[/]  —  {p.description}")
         console.print()
 
+    elif command == "/auto":
+        if _SESSION is not None:
+            _SESSION.pinned = False
+            print_success("Automatic per-turn routing re-enabled.")
+
+    elif command == "/route":
+        d = _SESSION.last_decision if _SESSION is not None else None
+        if d is None:
+            print_info("No routed turn yet.")
+        else:
+            console.print(d.summary(config.routing.presets))
+            console.print(f"  task type: {d.task_type} · harness hints: {', '.join(d.harnesses) or '-'}")
+            for note in d.notes:
+                console.print(f"  note: {note}")
+            if _SESSION.route_state is not None and _SESSION.route_state.routed_via:
+                console.print(f"  served by: {', '.join(_SESSION.route_state.routed_via[-5:])}")
+            if _SESSION.router.decisions_ok is False:
+                print_warning("FreeLLMAPI /v1/decisions unavailable; using heuristics.")
+
+    elif command in ("/good", "/bad"):
+        learner = _SESSION.learner if _SESSION is not None else None
+        ep = learner.feedback(command[1:], " ".join(parts[1:])) if learner else None
+        if ep is None:
+            print_warning("Nothing to rate yet.")
+        else:
+            print_success(f"Recorded {command[1:]} for: {ep.prompt[:60]}")
+
+    elif command == "/learn":
+        _print_learning_report()
+
+    elif command == "/harnesses":
+        _print_harnesses(config)
+
     elif command == "/profile":
         if len(parts) < 2:
             print_warning("Usage: /profile <name>")
+        elif _SESSION is not None:
+            from deo.agents.registry import get_profile
+            try:
+                profile = get_profile(parts[1])
+                _SESSION.pin(parts[1])
+                agent = _SESSION.agent_for(parts[1])
+                print_success(f"Pinned profile: [bold]{parts[1]}[/] — {profile.description} (/auto to unpin)")
+            except KeyError:
+                print_error(f"Profile '{parts[1]}' not found. Use /profiles to list.")
         else:
             profile_name = parts[1]
             try:
@@ -420,12 +497,17 @@ def main(
     if no_index:
         config.chroma.auto_index = False
 
-    # Initialize
+    session_id = str(uuid.uuid4())[:8]
+
+    # Initialize (the profile is applied before the agent is built)
     try:
         manager, indexer, agent = _initialize(
             config,
             force_reindex=force_index,
             quiet=bool(prompt),  # Quiet if one-shot
+            profile=profile,
+            pinned=profile != "default",
+            session_id=session_id,
         )
     except ImportError as e:
         print_error(f"Missing dependency: {e}")
@@ -435,19 +517,6 @@ def main(
         print_error(f"Initialization failed: {e}")
         raise typer.Exit(1)
 
-    # Apply profile
-    from deo.agents.registry import get_profile, list_profiles
-    try:
-        p = get_profile(profile)
-        config.subagents.planner = p.enable_planner
-        config.subagents.implementer = p.enable_implementer
-        config.subagents.reviewer = p.enable_reviewer
-        config.subagents.tester = p.enable_tester
-        config.subagents.documenter = p.enable_documenter
-    except KeyError:
-        print_warning(f"Profile '{profile}' not found, using 'default'.")
-
-    session_id = str(uuid.uuid4())[:8]
 
     # -----------------------------------------------------------------------
     # One-shot mode
@@ -567,6 +636,73 @@ def main(
         on_submit=handle_tui_input,
     )
     tui.run()
+
+
+def _print_learning_report() -> None:
+    learner = _SESSION.learner if _SESSION is not None else None
+    if learner is None:
+        print_info("Learning is disabled.")
+        return
+    r = learner.report()
+    console.print(f"\n[bold]Deo learning[/] — {r['episodes']} episodes, {r['lessons']} lessons")
+    console.print(f"  outcomes: {r['outcomes']}  feedback: {r['feedback']}")
+    for cat, preset, wins, n in r["presets"]:
+        console.print(f"  route {cat:11} {preset:9} {wins}/{n} verified ok")
+    for h, (ok, n) in r["harnesses"].items():
+        console.print(f"  harness {h:9} {ok}/{n} ok")
+    if r["served_models"]:
+        console.print("  served by: " + ", ".join(f"{m} ({c})" for m, c in r["served_models"]))
+    for f, prior in r["top_files"]:
+        console.print(f"  useful file {f} ({prior})")
+
+
+def _print_harnesses(config: DeoConfig) -> None:
+    from deo.harnesses.registry import all_statuses
+
+    console.print("\n[bold]External harnesses[/] (all routed through FreeLLMAPI)\n")
+    for st in all_statuses(config.harnesses.commands, config.harnesses.disabled):
+        mark = "[green]ready[/]" if st.ready else f"[yellow]{st.reason}[/]"
+        console.print(f"  [bold cyan]{st.spec.id:9}[/] {st.spec.name:26} {mark}")
+        console.print(f"            best for: {', '.join(st.spec.best_for)}")
+        if not st.ready and st.spec.setup:
+            console.print(f"            setup: npx freellmapi setup-{st.spec.setup} "
+                          "--url http://localhost:3001 --api-key $FREELLMAPI_API_KEY")
+    console.print()
+
+
+@app.command("harnesses")
+def harnesses_command(root: Optional[str] = typer.Option(None, "--root", "-r")) -> None:
+    """List external coding harnesses, readiness and FreeLLMAPI setup commands."""
+    project_root = Path(root).resolve() if root else find_project_root()
+    _print_harnesses(DeoConfig.load(project_root))
+
+
+@app.command("learn")
+def learn_command(
+    distill: bool = typer.Option(False, "--distill", help="Distill lessons from recent episodes with the model"),
+    root: Optional[str] = typer.Option(None, "--root", "-r"),
+) -> None:
+    """Show what Deo has learned; optionally distill new lessons from history."""
+    global _SESSION
+    from deo.learning.experience import SessionLearner, distill_lessons
+
+    project_root = Path(root).resolve() if root else find_project_root()
+    config = DeoConfig.load(project_root)
+    config.ensure_deo_dir()
+    learner = SessionLearner(config.experience_dir)
+    if distill:
+        from deo.agents.factory import _build_model
+        try:
+            added = distill_lessons(_build_model(config), learner)
+            print_success(f"Distilled {len(added)} lesson(s).")
+            for lesson in added:
+                console.print(f"  - {lesson.text}")
+        except Exception as exc:
+            print_error(f"Distillation failed: {exc}")
+    _SESSION = type("S", (), {"learner": learner})()
+    _print_learning_report()
+    for lesson in learner.lessons.lessons[-10:]:
+        console.print(f"  lesson: {lesson.text}")
 
 
 @app.command("index")

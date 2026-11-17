@@ -66,6 +66,22 @@ Spawn subagents when:
 
 Do direct work in the orchestrator only for trivial or tightly coupled tasks.
 
+## External Harnesses (all on the same FreeLLMAPI gateway)
+`list_harnesses` / `delegate_to_harness` hand self-contained work to the tool
+best suited for it: aider (one-shot targeted edits), claude / codex (agentic
+multi-file work, debugging), omh (Oh My Hermes ulw-loop: parallel
+build-until-tests-pass), reasonix / dsh (long-context exploration), hermes
+(research). Follow the `<deo_route>` hint when present. Always verify a
+harness's result yourself (git_diff, tests) before reporting success.
+
+## Continuous Improvement
+- Lessons from earlier sessions arrive in `<deo_lessons>`; apply them.
+- When you discover something reusable about this repo (a working command, a
+  pitfall, a convention), call `record_lesson`.
+- After finishing a complex, repeatable workflow, consider `save_skill`.
+- Prefer `search_symbol` for known identifiers and `semantic_search` (hybrid
+  dense + BM25) for concepts.
+
 ## Terminal and Tool Discipline
 - Treat the filesystem and shell as the source of truth.
 - Read before edit; verify parent directories before write.
